@@ -1,6 +1,6 @@
 """
-Mağaza Gruplama Analizi - K-Means Clustering
-Thorius Analytics Dashboard
+Mağaza Gruplama Analizi - Çok Boyutlu K-Means Clustering
+Her boyut için ayrı gruplama yapılır
 """
 
 import streamlit as st
@@ -11,160 +11,56 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import silhouette_score
 import io
 from datetime import datetime
 
 # Sayfa ayarları
 st.set_page_config(
-    page_title="Mağaza Gruplama Analizi",
-    page_icon="🏪",
+    page_title="Cluster Analizi",
+    page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS - Thorius teması
+# Custom CSS
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 
-    * {
-        font-family: 'Inter', sans-serif;
-    }
+    * { font-family: 'Inter', sans-serif; }
 
     .main-header {
         background: linear-gradient(135deg, #1e3a5f 0%, #4a2c7a 50%, #1e3a5f 100%);
-        padding: 2rem;
+        padding: 1.5rem;
         border-radius: 16px;
-        margin-bottom: 2rem;
+        margin-bottom: 1.5rem;
         text-align: center;
-        box-shadow: 0 10px 40px rgba(74, 44, 122, 0.3);
     }
 
-    .main-header h1 {
-        color: white;
-        font-size: 2.5rem;
-        font-weight: 700;
-        margin: 0;
-        text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
-    }
-
-    .main-header p {
-        color: rgba(255,255,255,0.85);
-        font-size: 1.1rem;
-        margin-top: 0.5rem;
-    }
+    .main-header h1 { color: white; font-size: 2rem; margin: 0; }
+    .main-header p { color: rgba(255,255,255,0.85); margin-top: 0.3rem; }
 
     .metric-card {
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        padding: 1.5rem;
-        border-radius: 16px;
+        padding: 1rem;
+        border-radius: 12px;
         color: white;
         text-align: center;
-        box-shadow: 0 8px 32px rgba(102, 126, 234, 0.3);
-        transition: transform 0.3s ease;
     }
 
-    .metric-card:hover {
-        transform: translateY(-5px);
-    }
+    .metric-card.blue { background: linear-gradient(135deg, #1e3a5f 0%, #2d5a87 100%); }
+    .metric-card.purple { background: linear-gradient(135deg, #4a2c7a 0%, #7b4397 100%); }
+    .metric-card.teal { background: linear-gradient(135deg, #0d7377 0%, #14919b 100%); }
 
-    .metric-card.blue {
-        background: linear-gradient(135deg, #1e3a5f 0%, #2d5a87 100%);
-    }
-
-    .metric-card.purple {
-        background: linear-gradient(135deg, #4a2c7a 0%, #7b4397 100%);
-    }
-
-    .metric-card.teal {
-        background: linear-gradient(135deg, #0d7377 0%, #14919b 100%);
-    }
-
-    .metric-card.indigo {
-        background: linear-gradient(135deg, #3a1c71 0%, #d76d77 50%, #ffaf7b 100%);
-    }
-
-    .metric-value {
-        font-size: 2.5rem;
-        font-weight: 700;
-        margin: 0.5rem 0;
-    }
-
-    .metric-label {
-        font-size: 0.9rem;
-        opacity: 0.9;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-    }
-
-    .cluster-card {
-        background: linear-gradient(145deg, #f8f9ff 0%, #e8ecff 100%);
-        border-left: 5px solid;
-        padding: 1.5rem;
-        border-radius: 12px;
-        margin-bottom: 1rem;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.08);
-    }
-
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 8px;
-        background: linear-gradient(90deg, #1e3a5f 0%, #4a2c7a 100%);
-        padding: 0.5rem;
-        border-radius: 12px;
-    }
-
-    .stTabs [data-baseweb="tab"] {
-        background-color: transparent;
-        color: rgba(255,255,255,0.7);
-        border-radius: 8px;
-        padding: 0.75rem 1.5rem;
-        font-weight: 500;
-    }
-
-    .stTabs [data-baseweb="tab"]:hover {
-        background-color: rgba(255,255,255,0.1);
-        color: white;
-    }
-
-    .stTabs [aria-selected="true"] {
-        background-color: white !important;
-        color: #1e3a5f !important;
-    }
-
-    .sidebar .stButton > button {
-        width: 100%;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        border: none;
-        padding: 0.75rem 1.5rem;
-        border-radius: 10px;
-        font-weight: 600;
-        font-size: 1rem;
-        transition: all 0.3s ease;
-        box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
-    }
-
-    .sidebar .stButton > button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 6px 20px rgba(102, 126, 234, 0.5);
-    }
+    .metric-value { font-size: 2rem; font-weight: 700; margin: 0.3rem 0; }
+    .metric-label { font-size: 0.85rem; opacity: 0.9; text-transform: uppercase; }
 
     .info-box {
-        background: linear-gradient(135deg, #e8f4f8 0%, #d4e9f7 100%);
+        background: #f0f4ff;
         border-left: 4px solid #1e3a5f;
-        padding: 1rem 1.5rem;
+        padding: 1rem;
         border-radius: 8px;
         margin: 1rem 0;
-    }
-
-    div[data-testid="stSidebar"] {
-        background: linear-gradient(180deg, #f8f9ff 0%, #e8ecff 100%);
-    }
-
-    .stDataFrame {
-        border-radius: 12px;
-        overflow: hidden;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -172,36 +68,13 @@ st.markdown("""
 # Cluster renkleri
 CLUSTER_COLORS = [
     '#667eea', '#764ba2', '#0d7377', '#f093fb', '#f5576c',
-    '#4facfe', '#00f2fe', '#43e97b', '#fa709a', '#fee140'
+    '#4facfe', '#00f2fe', '#43e97b', '#fa709a', '#fee140',
+    '#a8edea', '#fed6e3', '#d299c2', '#fef9d7', '#d4fc79'
 ]
 
-def create_sample_data():
-    """Örnek veri oluştur"""
-    np.random.seed(42)
-    n_stores = 150
-
-    stores = [f"Mağaza_{i+1}" for i in range(n_stores)]
-    cities = np.random.choice(['İstanbul', 'Ankara', 'İzmir', 'Bursa', 'Antalya', 'Konya'], n_stores)
-
-    data = {
-        'Mağaza_Adı': stores,
-        'Şehir': cities,
-        'Kapasite_m2': np.random.randint(50, 500, n_stores),
-        'Stok_Devir_Hızı': np.round(np.random.uniform(2, 12, n_stores), 2),
-        'Günlük_Satış_Adet': np.random.randint(20, 500, n_stores),
-        'Ortalama_Sepet_TL': np.round(np.random.uniform(150, 800, n_stores), 2),
-        'Personel_Sayısı': np.random.randint(3, 25, n_stores),
-        'Aylık_Ciro_TL': np.random.randint(50000, 2000000, n_stores),
-        'Müşteri_Sayısı': np.random.randint(500, 10000, n_stores),
-        'Karlılık_Oranı': np.round(np.random.uniform(5, 35, n_stores), 2),
-        'Doluluk_Oranı': np.round(np.random.uniform(40, 95, n_stores), 2),
-        'Metrekare_Verimlilik': np.round(np.random.uniform(100, 1000, n_stores), 2)
-    }
-
-    return pd.DataFrame(data)
 
 def load_data(uploaded_file):
-    """Dosya yükle ve oku"""
+    """Dosya yükle"""
     if uploaded_file is not None:
         if uploaded_file.name.endswith('.csv'):
             df = pd.read_csv(uploaded_file)
@@ -210,554 +83,366 @@ def load_data(uploaded_file):
         return df
     return None
 
+
 def get_numeric_columns(df):
     """Sayısal sütunları al"""
     return df.select_dtypes(include=[np.number]).columns.tolist()
 
-def perform_clustering(df, selected_metrics, n_clusters, normalize=True):
-    """K-Means clustering uygula"""
-    X = df[selected_metrics].copy()
-    X = X.fillna(X.mean())
 
-    if normalize:
-        scaler = StandardScaler()
-        X_scaled = scaler.fit_transform(X)
-    else:
-        X_scaled = X.values
+def cluster_single_dimension(values, n_clusters):
+    """Tek boyut için K-Means uygula"""
+    X = values.fillna(values.mean()).values.reshape(-1, 1)
+
+    # Normalize
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
 
     kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
     clusters = kmeans.fit_predict(X_scaled)
 
-    if n_clusters > 1:
-        silhouette = silhouette_score(X_scaled, clusters)
-    else:
-        silhouette = 0
+    # Cluster'ları değer ortalamasına göre sırala (düşükten yükseğe)
+    cluster_means = {}
+    for c in range(n_clusters):
+        cluster_means[c] = values[clusters == c].mean()
 
-    return clusters, kmeans, silhouette, X_scaled
+    # Sıralama: en düşük ortalama = 1, en yüksek = n_clusters
+    sorted_clusters = sorted(cluster_means.keys(), key=lambda x: cluster_means[x])
+    cluster_map = {old: new + 1 for new, old in enumerate(sorted_clusters)}
 
-def create_2d_scatter(df, metrics, clusters):
-    """2D Scatter plot oluştur"""
-    cluster_labels = [f"Cluster {c}" for c in clusters]
+    # Yeni cluster numaraları
+    new_clusters = np.array([cluster_map[c] for c in clusters])
 
-    fig = go.Figure()
+    return new_clusters, kmeans
 
-    for cluster_id in sorted(set(clusters)):
-        mask = [c == cluster_id for c in clusters]
-        fig.add_trace(go.Scatter(
-            x=df[metrics[0]][mask],
-            y=df[metrics[1]][mask],
-            mode='markers',
-            name=f'Cluster {cluster_id}',
-            marker=dict(
-                size=12,
-                color=CLUSTER_COLORS[cluster_id % len(CLUSTER_COLORS)],
-                opacity=0.7,
-                line=dict(width=1, color='white')
-            ),
-            hovertemplate=
-                f"<b>{metrics[0]}:</b> %{{x:,.2f}}<br>" +
-                f"<b>{metrics[1]}:</b> %{{y:,.2f}}<br>" +
-                f"<b>Cluster:</b> {cluster_id}<extra></extra>"
-        ))
 
-    fig.update_layout(
-        xaxis_title=metrics[0],
-        yaxis_title=metrics[1],
-        height=600,
-        paper_bgcolor='rgba(0,0,0,0)',
-        plot_bgcolor='rgba(248,249,255,0.95)',
-        legend=dict(
-            orientation="h",
-            yanchor="bottom",
-            y=1.02,
-            xanchor="right",
-            x=1
-        )
-    )
-
-    return fig
-
-def create_3d_scatter(df, metrics, clusters):
-    """3D Scatter plot oluştur"""
-    if len(metrics) < 3:
-        metrics = metrics + [metrics[0]] * (3 - len(metrics))
-
-    fig = go.Figure(data=[go.Scatter3d(
-        x=df[metrics[0]],
-        y=df[metrics[1]],
-        z=df[metrics[2]],
-        mode='markers',
-        marker=dict(
-            size=8,
-            color=clusters,
-            colorscale=[[i/(len(CLUSTER_COLORS)-1), c] for i, c in enumerate(CLUSTER_COLORS[:max(clusters)+1])],
-            opacity=0.8,
-            line=dict(width=1, color='white')
-        ),
-        text=[f"Cluster {c}" for c in clusters],
-        hovertemplate=
-            f"<b>{metrics[0]}:</b> %{{x:.2f}}<br>" +
-            f"<b>{metrics[1]}:</b> %{{y:.2f}}<br>" +
-            f"<b>{metrics[2]}:</b> %{{z:.2f}}<br>" +
-            "<b>Cluster:</b> %{text}<extra></extra>"
-    )])
-
-    fig.update_layout(
-        scene=dict(
-            xaxis_title=metrics[0],
-            yaxis_title=metrics[1],
-            zaxis_title=metrics[2],
-            bgcolor='rgba(248,249,255,0.95)'
-        ),
-        height=600,
-        margin=dict(l=0, r=0, t=30, b=0),
-        paper_bgcolor='rgba(0,0,0,0)',
-        plot_bgcolor='rgba(0,0,0,0)'
-    )
-
-    return fig
-
-def create_scatter_matrix(df, metrics, clusters):
-    """Scatter matrix oluştur"""
-    df_plot = df[metrics].copy()
-    df_plot['Cluster'] = [f"Cluster {c}" for c in clusters]
-
-    fig = px.scatter_matrix(
-        df_plot,
-        dimensions=metrics[:5],  # Max 5 metrik
-        color='Cluster',
-        color_discrete_sequence=CLUSTER_COLORS,
-        opacity=0.7
-    )
-
-    fig.update_layout(
-        height=700,
-        paper_bgcolor='rgba(0,0,0,0)',
-        plot_bgcolor='rgba(248,249,255,0.95)'
-    )
-
-    fig.update_traces(diagonal_visible=False, showupperhalf=False)
-
-    return fig
-
-def create_box_plots(df, metrics, clusters):
-    """Cluster bazında box plotlar"""
-    df_plot = df[metrics].copy()
-    df_plot['Cluster'] = [f"Cluster {c}" for c in clusters]
-
-    n_metrics = len(metrics)
-    cols = min(3, n_metrics)
-    rows = (n_metrics + cols - 1) // cols
-
-    fig = make_subplots(rows=rows, cols=cols, subplot_titles=metrics)
-
-    for i, metric in enumerate(metrics):
-        row = i // cols + 1
-        col = i % cols + 1
-
-        for cluster in sorted(df_plot['Cluster'].unique()):
-            cluster_data = df_plot[df_plot['Cluster'] == cluster][metric]
-            cluster_num = int(cluster.split()[-1])
-
-            fig.add_trace(
-                go.Box(
-                    y=cluster_data,
-                    name=cluster,
-                    marker_color=CLUSTER_COLORS[cluster_num % len(CLUSTER_COLORS)],
-                    showlegend=(i == 0)
-                ),
-                row=row, col=col
-            )
-
-    fig.update_layout(
-        height=300 * rows,
-        paper_bgcolor='rgba(0,0,0,0)',
-        plot_bgcolor='rgba(248,249,255,0.95)',
-        showlegend=True
-    )
-
-    return fig
-
-def create_radar_chart(cluster_profiles, metrics):
-    """Radar chart oluştur"""
-    fig = go.Figure()
-
-    # Değerleri normalize et (0-1 arasına)
-    profile_df = cluster_profiles[metrics]
-    normalized = (profile_df - profile_df.min()) / (profile_df.max() - profile_df.min() + 0.0001)
-
-    for i, (idx, row) in enumerate(normalized.iterrows()):
-        fig.add_trace(go.Scatterpolar(
-            r=row.values.tolist() + [row.values[0]],
-            theta=metrics + [metrics[0]],
-            fill='toself',
-            name=f'Cluster {idx}',
-            line=dict(color=CLUSTER_COLORS[i % len(CLUSTER_COLORS)]),
-            opacity=0.7
-        ))
-
-    fig.update_layout(
-        polar=dict(
-            radialaxis=dict(
-                visible=True,
-                range=[0, 1]
-            ),
-            bgcolor='rgba(248,249,255,0.95)'
-        ),
-        showlegend=True,
-        height=500,
-        paper_bgcolor='rgba(0,0,0,0)'
-    )
-
-    return fig
-
-def evaluate_silhouette(score):
-    """Silhouette Score'u anlaşılır değerlendirmeye çevir"""
-    if score >= 0.71:
-        return "Mükemmel", "#00c853", "Gruplar çok iyi ayrışmış"
-    elif score >= 0.51:
-        return "İyi", "#2196f3", "Gruplar iyi ayrışmış"
-    elif score >= 0.26:
-        return "Orta", "#ff9800", "Gruplar kabul edilebilir"
-    elif score >= 0:
-        return "Zayıf", "#ff5722", "Gruplar zayıf ayrışmış"
-    else:
-        return "Kötü", "#f44336", "Gruplar örtüşüyor"
-
-def render_metric_card(label, value, color_class="", subtitle=""):
-    """Metrik kartı HTML"""
-    subtitle_html = f'<div style="font-size: 0.75rem; opacity: 0.8; margin-top: 0.3rem;">{subtitle}</div>' if subtitle else ""
+def render_metric_card(label, value, color_class=""):
     return f"""
     <div class="metric-card {color_class}">
         <div class="metric-label">{label}</div>
         <div class="metric-value">{value}</div>
-        {subtitle_html}
     </div>
     """
 
-def render_cluster_summary_card(cluster_id, count, avg_values, color):
-    """Cluster özet kartı"""
-    metrics_html = ""
-    for metric, value in list(avg_values.items())[:4]:
-        short_metric = metric[:20] + "..." if len(metric) > 20 else metric
-        metrics_html += f"<div><strong>{short_metric}:</strong> {value:,.2f}</div>"
-
-    return f"""
-    <div class="cluster-card" style="border-left-color: {color};">
-        <h3 style="color: {color}; margin-top: 0;">Cluster {cluster_id}</h3>
-        <p style="font-size: 1.2rem; margin: 0.5rem 0;"><strong>{count}</strong> Mağaza</p>
-        <hr style="border: none; border-top: 1px solid #e0e0e0; margin: 1rem 0;">
-        {metrics_html}
-    </div>
-    """
 
 # Ana uygulama
 def main():
     # Header
     st.markdown("""
     <div class="main-header">
-        <h1>🏪 Mağaza Gruplama Analizi</h1>
-        <p>K-Means Clustering ile Akıllı Segmentasyon | Thorius Analytics</p>
+        <h1>📊 Cluster Analizi</h1>
+        <p>Her boyut için ayrı gruplama</p>
     </div>
     """, unsafe_allow_html=True)
 
     # Sidebar
     with st.sidebar:
-        st.markdown("### 📁 Veri Kaynağı")
+        st.markdown("### 📁 Dosya Yükle")
 
         uploaded_file = st.file_uploader(
-            "Excel/CSV Dosya Yükle",
+            "Excel veya CSV",
             type=['xlsx', 'xls', 'csv'],
-            help="Mağaza verilerinizi içeren dosyayı yükleyin"
+            help="Verilerinizi içeren dosyayı yükleyin"
         )
-
-        use_sample = st.checkbox("Örnek veri kullan", value=False)
 
         if uploaded_file is not None:
             df = load_data(uploaded_file)
             st.success(f"✅ {len(df)} satır yüklendi")
-        elif use_sample:
-            df = create_sample_data()
-            st.info("📊 Örnek veri kullanılıyor")
         else:
             df = None
 
         if df is not None:
             st.markdown("---")
-            st.markdown("### 📊 Analiz Ayarları")
-
             numeric_cols = get_numeric_columns(df)
+            all_cols = df.columns.tolist()
 
-            # İsim sütununu bul
-            text_cols = df.select_dtypes(include=['object']).columns.tolist()
-            name_col = text_cols[0] if text_cols else None
-
-            selected_metrics = st.multiselect(
-                "Metrikler",
-                options=numeric_cols,
-                default=numeric_cols[:5] if len(numeric_cols) >= 5 else numeric_cols,
-                help="Gruplama için kullanılacak metrikleri seçin"
+            # 1. Neyi grupla
+            st.markdown("### 1️⃣ Neyi Grupla?")
+            name_col = st.selectbox(
+                "Gruplanacak Kolon",
+                options=all_cols,
+                index=0,
+                help="Gruplamak istediğiniz öğeleri içeren kolon"
             )
 
-            n_clusters = st.slider(
-                "Cluster Sayısı",
-                min_value=2,
-                max_value=10,
-                value=4,
-                help="Oluşturulacak grup sayısı"
-            )
+            # 2. Boyutlar ve her birinin grup sayısı
+            st.markdown("### 2️⃣ Boyutlar ve Grup Sayıları")
 
-            normalize = st.radio(
-                "Normalizasyon",
-                options=["Evet", "Hayır"],
-                horizontal=True,
-                help="Verileri standartlaştır"
-            ) == "Evet"
+            available_metrics = [col for col in numeric_cols if col != name_col]
+
+            # Boyut 1
+            st.markdown("**Boyut 1**")
+            boyut1 = st.selectbox("Kolon", options=["Seçiniz..."] + available_metrics, key="b1")
+            grup1 = st.slider("Grup Sayısı", 2, 10, 3, key="g1") if boyut1 != "Seçiniz..." else 3
+
+            # Boyut 2
+            st.markdown("**Boyut 2 (Opsiyonel)**")
+            remaining2 = [c for c in available_metrics if c != boyut1]
+            boyut2 = st.selectbox("Kolon", options=["Seçiniz..."] + remaining2, key="b2")
+            grup2 = st.slider("Grup Sayısı", 2, 10, 3, key="g2") if boyut2 != "Seçiniz..." else 3
+
+            # Boyut 3
+            st.markdown("**Boyut 3 (Opsiyonel)**")
+            remaining3 = [c for c in remaining2 if c != boyut2]
+            boyut3 = st.selectbox("Kolon", options=["Seçiniz..."] + remaining3, key="b3")
+            grup3 = st.slider("Grup Sayısı", 2, 10, 3, key="g3") if boyut3 != "Seçiniz..." else 3
 
             st.markdown("---")
-
-            run_clustering = st.button("🚀 Gruplama Yap", use_container_width=True)
+            run_analysis = st.button("🚀 Grupla", use_container_width=True)
         else:
-            selected_metrics = []
-            run_clustering = False
+            run_analysis = False
             name_col = None
+            boyut1 = boyut2 = boyut3 = "Seçiniz..."
+            grup1 = grup2 = grup3 = 3
 
     # Ana içerik
     if df is None:
         st.markdown("""
         <div class="info-box">
             <h3>👋 Hoş Geldiniz!</h3>
-            <p>Mağaza gruplama analizine başlamak için:</p>
-            <ol>
-                <li>Sol panelden Excel/CSV dosyanızı yükleyin</li>
-                <li>Veya "Örnek veri kullan" seçeneğini işaretleyin</li>
-                <li>Analiz metriklerini seçin</li>
-                <li>"Gruplama Yap" butonuna tıklayın</li>
-            </ol>
+            <p>Başlamak için sol panelden dosyanızı yükleyin.</p>
         </div>
         """, unsafe_allow_html=True)
         return
 
-    if len(selected_metrics) < 2:
-        st.warning("⚠️ Lütfen en az 2 metrik seçin")
+    # Seçilen boyutları topla
+    boyutlar = []
+    grup_sayilari = []
+
+    if boyut1 != "Seçiniz...":
+        boyutlar.append(boyut1)
+        grup_sayilari.append(grup1)
+    if boyut2 != "Seçiniz...":
+        boyutlar.append(boyut2)
+        grup_sayilari.append(grup2)
+    if boyut3 != "Seçiniz...":
+        boyutlar.append(boyut3)
+        grup_sayilari.append(grup3)
+
+    if len(boyutlar) == 0:
+        st.warning("⚠️ Lütfen en az 1 boyut seçin")
         return
 
     # Session state
-    if 'clusters' not in st.session_state:
-        st.session_state.clusters = None
-        st.session_state.silhouette = None
-        st.session_state.kmeans = None
+    if 'results' not in st.session_state:
+        st.session_state.results = None
 
-    if run_clustering:
-        with st.spinner("Clustering yapılıyor..."):
-            clusters, kmeans, silhouette, X_scaled = perform_clustering(
-                df, selected_metrics, n_clusters, normalize
-            )
-            st.session_state.clusters = clusters
-            st.session_state.silhouette = silhouette
-            st.session_state.kmeans = kmeans
-            st.session_state.X_scaled = X_scaled
+    if run_analysis:
+        with st.spinner("Gruplama yapılıyor..."):
+            results = df.copy()
 
-    if st.session_state.clusters is not None:
-        clusters = st.session_state.clusters
-        silhouette = st.session_state.silhouette
+            # Her boyut için ayrı clustering
+            for i, (boyut, n_grup) in enumerate(zip(boyutlar, grup_sayilari)):
+                clusters, _ = cluster_single_dimension(df[boyut], n_grup)
+                results[f'{boyut}_Grup'] = clusters
 
-        # Sonuç dataframe
-        df_result = df.copy()
-        df_result['Cluster'] = clusters
+            # Kombine grup oluştur
+            if len(boyutlar) == 1:
+                results['Kombine_Grup'] = results[f'{boyutlar[0]}_Grup'].astype(str)
+            else:
+                grup_cols = [f'{b}_Grup' for b in boyutlar]
+                results['Kombine_Grup'] = results[grup_cols].astype(str).agg('-'.join, axis=1)
+
+            st.session_state.results = results
+            st.session_state.boyutlar = boyutlar
+            st.session_state.grup_sayilari = grup_sayilari
+            st.session_state.name_col = name_col
+
+    if st.session_state.results is not None:
+        results = st.session_state.results
+        boyutlar = st.session_state.boyutlar
+        grup_sayilari = st.session_state.grup_sayilari
+        name_col = st.session_state.name_col
 
         # Üst metrikler
-        col1, col2, col3, col4 = st.columns(4)
+        col1, col2, col3 = st.columns(3)
 
         with col1:
-            st.markdown(render_metric_card("Toplam Mağaza", len(df), "blue"), unsafe_allow_html=True)
+            st.markdown(render_metric_card("Toplam Kayıt", len(results), "blue"), unsafe_allow_html=True)
 
         with col2:
-            st.markdown(render_metric_card("Cluster Sayısı", n_clusters, "purple"), unsafe_allow_html=True)
+            st.markdown(render_metric_card("Boyut Sayısı", len(boyutlar), "purple"), unsafe_allow_html=True)
 
         with col3:
-            quality_label, quality_color, quality_desc = evaluate_silhouette(silhouette)
-            st.markdown(render_metric_card("Gruplama Kalitesi", quality_label, "teal", f"Skor: {silhouette:.2f}"), unsafe_allow_html=True)
-
-        with col4:
-            cluster_counts = pd.Series(clusters).value_counts()
-            biggest_cluster = cluster_counts.idxmax()
-            st.markdown(render_metric_card("En Büyük Cluster", f"#{biggest_cluster} ({cluster_counts[biggest_cluster]})", "indigo"), unsafe_allow_html=True)
+            unique_combos = results['Kombine_Grup'].nunique()
+            st.markdown(render_metric_card("Benzersiz Grup", unique_combos, "teal"), unsafe_allow_html=True)
 
         st.markdown("<br>", unsafe_allow_html=True)
 
         # Tablar
-        tab1, tab2, tab3 = st.tabs(["📈 Görselleştirme", "🎯 Cluster Profilleri", "📋 Detay Tablo"])
+        tab1, tab2, tab3 = st.tabs(["📈 Görselleştirme", "📊 Grup Dağılımları", "📋 Detay Tablo"])
 
         with tab1:
-            # 2 metrik seçildiyse 2D, 3+ ise 3D göster
-            if len(selected_metrics) == 2:
-                st.markdown("### 2D Cluster Dağılımı")
-                fig_scatter = create_2d_scatter(df, selected_metrics, clusters)
-                st.plotly_chart(fig_scatter, use_container_width=True)
+            if len(boyutlar) == 1:
+                # 1D - Histogram
+                st.markdown(f"### {boyutlar[0]} Dağılımı")
+                fig = px.histogram(
+                    results,
+                    x=boyutlar[0],
+                    color=f'{boyutlar[0]}_Grup',
+                    color_discrete_sequence=CLUSTER_COLORS,
+                    barmode='overlay',
+                    opacity=0.7
+                )
+                fig.update_layout(height=500)
+                st.plotly_chart(fig, use_container_width=True)
+
+            elif len(boyutlar) == 2:
+                # 2D - Scatter
+                st.markdown(f"### {boyutlar[0]} vs {boyutlar[1]}")
+                fig = px.scatter(
+                    results,
+                    x=boyutlar[0],
+                    y=boyutlar[1],
+                    color='Kombine_Grup',
+                    color_discrete_sequence=CLUSTER_COLORS,
+                    hover_data=[name_col] if name_col else None,
+                    opacity=0.7
+                )
+                fig.update_traces(marker=dict(size=10))
+                fig.update_layout(height=600)
+                st.plotly_chart(fig, use_container_width=True)
+
             else:
-                st.markdown("### 3D Cluster Dağılımı")
-                fig_3d = create_3d_scatter(df, selected_metrics, clusters)
-                st.plotly_chart(fig_3d, use_container_width=True)
-
-                st.markdown("### 2D Scatter Matrix")
-                fig_matrix = create_scatter_matrix(df, selected_metrics, clusters)
-                st.plotly_chart(fig_matrix, use_container_width=True)
-
-            st.markdown("### Cluster Bazında Dağılımlar")
-            fig_box = create_box_plots(df, selected_metrics[:6], clusters)  # Max 6 metrik
-            st.plotly_chart(fig_box, use_container_width=True)
+                # 3D - Scatter
+                st.markdown(f"### 3D Görünüm")
+                fig = px.scatter_3d(
+                    results,
+                    x=boyutlar[0],
+                    y=boyutlar[1],
+                    z=boyutlar[2],
+                    color='Kombine_Grup',
+                    color_discrete_sequence=CLUSTER_COLORS,
+                    hover_data=[name_col] if name_col else None,
+                    opacity=0.7
+                )
+                fig.update_traces(marker=dict(size=5))
+                fig.update_layout(height=700)
+                st.plotly_chart(fig, use_container_width=True)
 
         with tab2:
-            # Cluster profilleri hesapla
-            cluster_profiles = df_result.groupby('Cluster')[selected_metrics].mean()
-            cluster_counts = df_result['Cluster'].value_counts().sort_index()
+            # Her boyut için grup dağılımı
+            for i, (boyut, n_grup) in enumerate(zip(boyutlar, grup_sayilari)):
+                st.markdown(f"### {boyut} - {n_grup} Grup")
 
-            st.markdown("### Cluster Özet Kartları")
+                col_chart, col_stats = st.columns([2, 1])
 
-            cols = st.columns(min(4, n_clusters))
-            for i, (cluster_id, row) in enumerate(cluster_profiles.iterrows()):
-                col_idx = i % len(cols)
-                with cols[col_idx]:
-                    avg_values = row.to_dict()
-                    color = CLUSTER_COLORS[i % len(CLUSTER_COLORS)]
-                    st.markdown(
-                        render_cluster_summary_card(cluster_id, cluster_counts[cluster_id], avg_values, color),
-                        unsafe_allow_html=True
+                with col_chart:
+                    # Box plot
+                    fig = px.box(
+                        results,
+                        x=f'{boyut}_Grup',
+                        y=boyut,
+                        color=f'{boyut}_Grup',
+                        color_discrete_sequence=CLUSTER_COLORS
                     )
+                    fig.update_layout(height=350, showlegend=False)
+                    st.plotly_chart(fig, use_container_width=True)
 
-            st.markdown("---")
+                with col_stats:
+                    # Grup istatistikleri
+                    stats = results.groupby(f'{boyut}_Grup')[boyut].agg(['count', 'mean', 'min', 'max']).round(2)
+                    stats.columns = ['Adet', 'Ortalama', 'Min', 'Max']
+                    st.dataframe(stats, use_container_width=True)
 
-            col_radar, col_table = st.columns([1, 1])
+                st.markdown("---")
 
-            with col_radar:
-                st.markdown("### Cluster Profil Karşılaştırması")
-                display_metrics = selected_metrics[:8]  # Radar için max 8 metrik
-                fig_radar = create_radar_chart(cluster_profiles, display_metrics)
-                st.plotly_chart(fig_radar, use_container_width=True)
+            # Kombine grup dağılımı
+            st.markdown("### Kombine Grup Dağılımı")
+            combo_counts = results['Kombine_Grup'].value_counts().reset_index()
+            combo_counts.columns = ['Grup', 'Adet']
 
-            with col_table:
-                st.markdown("### Cluster Merkezleri")
-
-                # Merkez tablosu
-                centers_df = cluster_profiles.round(2)
-                centers_df.insert(0, 'Mağaza Sayısı', cluster_counts)
-
-                st.dataframe(
-                    centers_df,
-                    use_container_width=True,
-                    height=400
-                )
+            fig = px.bar(
+                combo_counts.head(20),
+                x='Grup',
+                y='Adet',
+                color='Adet',
+                color_continuous_scale='Viridis'
+            )
+            fig.update_layout(height=400)
+            st.plotly_chart(fig, use_container_width=True)
 
         with tab3:
-            st.markdown("### Mağaza Detay Listesi")
+            st.markdown("### Detay Listesi")
 
             # Filtreler
-            col_filter1, col_filter2 = st.columns([1, 3])
+            filter_cols = st.columns(len(boyutlar) + 1)
 
-            with col_filter1:
-                selected_clusters = st.multiselect(
-                    "Cluster Filtre",
-                    options=sorted(df_result['Cluster'].unique()),
-                    default=sorted(df_result['Cluster'].unique())
-                )
+            filtered = results.copy()
 
-            with col_filter2:
+            for i, boyut in enumerate(boyutlar):
+                with filter_cols[i]:
+                    grup_col = f'{boyut}_Grup'
+                    selected = st.multiselect(
+                        f"{boyut} Grup",
+                        options=sorted(results[grup_col].unique()),
+                        default=sorted(results[grup_col].unique())
+                    )
+                    filtered = filtered[filtered[grup_col].isin(selected)]
+
+            with filter_cols[-1]:
                 if name_col:
-                    search_text = st.text_input("Mağaza Ara", placeholder="Mağaza adı ile ara...")
-                else:
-                    search_text = ""
+                    search = st.text_input("Ara", placeholder="İsim ara...")
+                    if search:
+                        filtered = filtered[filtered[name_col].astype(str).str.contains(search, case=False, na=False)]
 
-            # Filtreleme
-            filtered_df = df_result[df_result['Cluster'].isin(selected_clusters)]
+            # Tablo göster
+            # Sütun sırası: name_col, boyutlar, grup kolonları, kombine grup
+            display_cols = [name_col] if name_col else []
+            display_cols += boyutlar
+            display_cols += [f'{b}_Grup' for b in boyutlar]
+            display_cols.append('Kombine_Grup')
 
-            if search_text and name_col:
-                filtered_df = filtered_df[filtered_df[name_col].str.contains(search_text, case=False, na=False)]
+            # Diğer kolonları da ekle
+            other_cols = [c for c in results.columns if c not in display_cols]
+            display_cols += other_cols
 
-            # Tablo
             st.dataframe(
-                filtered_df,
+                filtered[display_cols],
                 use_container_width=True,
                 height=500
             )
 
-            st.markdown(f"**Gösterilen:** {len(filtered_df)} / {len(df_result)} mağaza")
+            st.markdown(f"**Gösterilen:** {len(filtered)} / {len(results)} kayıt")
 
             # Export
             st.markdown("---")
-            st.markdown("### 📥 Rapor İndir")
-            st.info("Orijinal verilerinizin yanına **Cluster** ve **Cluster_Adı** kolonları eklenerek indirilir.")
+            st.markdown("### 📥 İndir")
 
-            col_exp1, col_exp2, col_exp3 = st.columns([1, 1, 1])
-
-            # Cluster adları ekle
-            cluster_names = {
-                0: "Grup A", 1: "Grup B", 2: "Grup C", 3: "Grup D", 4: "Grup E",
-                5: "Grup F", 6: "Grup G", 7: "Grup H", 8: "Grup I", 9: "Grup J"
-            }
-
-            # Tam rapor oluştur (orijinal veri + cluster bilgileri)
-            full_report = df.copy()
-            full_report['Cluster'] = clusters
-            full_report['Cluster_Adı'] = [cluster_names.get(c, f"Grup {c}") for c in clusters]
-
-            # Silhouette değerlendirmesi
-            quality_label, _, quality_desc = evaluate_silhouette(silhouette)
+            col_exp1, col_exp2 = st.columns(2)
 
             with col_exp1:
-                # Excel export - detaylı rapor
+                # Excel
                 buffer = io.BytesIO()
                 with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-                    # Orijinal veri + cluster
-                    full_report.to_excel(writer, index=False, sheet_name='Veri ve Gruplar')
+                    results[display_cols].to_excel(writer, index=False, sheet_name='Gruplu Veri')
 
-                    # Cluster profilleri
-                    cluster_profiles_export = df_result.groupby('Cluster')[selected_metrics].mean().round(2)
-                    cluster_profiles_export.insert(0, 'Mağaza_Sayısı', df_result['Cluster'].value_counts().sort_index())
-                    cluster_profiles_export.to_excel(writer, sheet_name='Cluster Profilleri')
-
-                    # Özet bilgiler
-                    summary_df = pd.DataFrame({
-                        'Metrik': ['Toplam Mağaza', 'Cluster Sayısı', 'Silhouette Score', 'Gruplama Kalitesi', 'Kullanılan Metrikler'],
-                        'Değer': [len(df), n_clusters, f"{silhouette:.3f}", quality_label, ', '.join(selected_metrics)]
-                    })
-                    summary_df.to_excel(writer, index=False, sheet_name='Analiz Özeti')
+                    # Her boyut için özet
+                    for boyut in boyutlar:
+                        stats = results.groupby(f'{boyut}_Grup')[boyut].agg(['count', 'mean', 'min', 'max']).round(2)
+                        stats.to_excel(writer, sheet_name=f'{boyut[:20]} Özet')
 
                 st.download_button(
-                    label="📥 Excel Rapor",
+                    label="📥 Excel İndir",
                     data=buffer.getvalue(),
-                    file_name=f"magaza_gruplama_rapor_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+                    file_name=f"gruplama_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     use_container_width=True
                 )
 
             with col_exp2:
-                # CSV export - sadece veri + cluster
-                csv = full_report.to_csv(index=False).encode('utf-8-sig')
+                # CSV
+                csv = results[display_cols].to_csv(index=False).encode('utf-8-sig')
                 st.download_button(
-                    label="📥 CSV Rapor",
+                    label="📥 CSV İndir",
                     data=csv,
-                    file_name=f"magaza_gruplama_rapor_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+                    file_name=f"gruplama_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
                     mime="text/csv",
                     use_container_width=True
                 )
 
-            with col_exp3:
-                # Sadece filtrelenmiş veri
-                filtered_report = full_report[full_report['Cluster'].isin(selected_clusters)]
-                if search_text and name_col:
-                    filtered_report = filtered_report[filtered_report[name_col].str.contains(search_text, case=False, na=False)]
-
-                csv_filtered = filtered_report.to_csv(index=False).encode('utf-8-sig')
-                st.download_button(
-                    label="📥 Filtrelenmiş CSV",
-                    data=csv_filtered,
-                    file_name=f"magaza_gruplama_filtreli_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
-                    mime="text/csv",
-                    use_container_width=True
-                )
     else:
-        st.info("👆 Sol panelden ayarları yapıp 'Gruplama Yap' butonuna tıklayın")
+        st.info("👆 Sol panelden ayarları yapıp 'Grupla' butonuna tıklayın")
+
 
 if __name__ == "__main__":
     main()
