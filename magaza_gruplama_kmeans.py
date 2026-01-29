@@ -235,6 +235,48 @@ def perform_clustering(df, selected_metrics, n_clusters, normalize=True):
 
     return clusters, kmeans, silhouette, X_scaled
 
+def create_2d_scatter(df, metrics, clusters):
+    """2D Scatter plot oluştur"""
+    cluster_labels = [f"Cluster {c}" for c in clusters]
+
+    fig = go.Figure()
+
+    for cluster_id in sorted(set(clusters)):
+        mask = [c == cluster_id for c in clusters]
+        fig.add_trace(go.Scatter(
+            x=df[metrics[0]][mask],
+            y=df[metrics[1]][mask],
+            mode='markers',
+            name=f'Cluster {cluster_id}',
+            marker=dict(
+                size=12,
+                color=CLUSTER_COLORS[cluster_id % len(CLUSTER_COLORS)],
+                opacity=0.7,
+                line=dict(width=1, color='white')
+            ),
+            hovertemplate=
+                f"<b>{metrics[0]}:</b> %{{x:,.2f}}<br>" +
+                f"<b>{metrics[1]}:</b> %{{y:,.2f}}<br>" +
+                f"<b>Cluster:</b> {cluster_id}<extra></extra>"
+        ))
+
+    fig.update_layout(
+        xaxis_title=metrics[0],
+        yaxis_title=metrics[1],
+        height=600,
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(248,249,255,0.95)',
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1
+        )
+    )
+
+    return fig
+
 def create_3d_scatter(df, metrics, clusters):
     """3D Scatter plot oluştur"""
     if len(metrics) < 3:
@@ -369,12 +411,27 @@ def create_radar_chart(cluster_profiles, metrics):
 
     return fig
 
-def render_metric_card(label, value, color_class=""):
+def evaluate_silhouette(score):
+    """Silhouette Score'u anlaşılır değerlendirmeye çevir"""
+    if score >= 0.71:
+        return "Mükemmel", "#00c853", "Gruplar çok iyi ayrışmış"
+    elif score >= 0.51:
+        return "İyi", "#2196f3", "Gruplar iyi ayrışmış"
+    elif score >= 0.26:
+        return "Orta", "#ff9800", "Gruplar kabul edilebilir"
+    elif score >= 0:
+        return "Zayıf", "#ff5722", "Gruplar zayıf ayrışmış"
+    else:
+        return "Kötü", "#f44336", "Gruplar örtüşüyor"
+
+def render_metric_card(label, value, color_class="", subtitle=""):
     """Metrik kartı HTML"""
+    subtitle_html = f'<div style="font-size: 0.75rem; opacity: 0.8; margin-top: 0.3rem;">{subtitle}</div>' if subtitle else ""
     return f"""
     <div class="metric-card {color_class}">
         <div class="metric-label">{label}</div>
         <div class="metric-value">{value}</div>
+        {subtitle_html}
     </div>
     """
 
@@ -519,7 +576,8 @@ def main():
             st.markdown(render_metric_card("Cluster Sayısı", n_clusters, "purple"), unsafe_allow_html=True)
 
         with col3:
-            st.markdown(render_metric_card("Silhouette Score", f"{silhouette:.3f}", "teal"), unsafe_allow_html=True)
+            quality_label, quality_color, quality_desc = evaluate_silhouette(silhouette)
+            st.markdown(render_metric_card("Gruplama Kalitesi", quality_label, "teal", f"Skor: {silhouette:.2f}"), unsafe_allow_html=True)
 
         with col4:
             cluster_counts = pd.Series(clusters).value_counts()
@@ -532,13 +590,19 @@ def main():
         tab1, tab2, tab3 = st.tabs(["📈 Görselleştirme", "🎯 Cluster Profilleri", "📋 Detay Tablo"])
 
         with tab1:
-            st.markdown("### 3D Cluster Dağılımı")
-            fig_3d = create_3d_scatter(df, selected_metrics, clusters)
-            st.plotly_chart(fig_3d, use_container_width=True)
+            # 2 metrik seçildiyse 2D, 3+ ise 3D göster
+            if len(selected_metrics) == 2:
+                st.markdown("### 2D Cluster Dağılımı")
+                fig_scatter = create_2d_scatter(df, selected_metrics, clusters)
+                st.plotly_chart(fig_scatter, use_container_width=True)
+            else:
+                st.markdown("### 3D Cluster Dağılımı")
+                fig_3d = create_3d_scatter(df, selected_metrics, clusters)
+                st.plotly_chart(fig_3d, use_container_width=True)
 
-            st.markdown("### 2D Scatter Matrix")
-            fig_matrix = create_scatter_matrix(df, selected_metrics, clusters)
-            st.plotly_chart(fig_matrix, use_container_width=True)
+                st.markdown("### 2D Scatter Matrix")
+                fig_matrix = create_scatter_matrix(df, selected_metrics, clusters)
+                st.plotly_chart(fig_matrix, use_container_width=True)
 
             st.markdown("### Cluster Bazında Dağılımlar")
             fig_box = create_box_plots(df, selected_metrics[:6], clusters)  # Max 6 metrik
@@ -580,7 +644,7 @@ def main():
                 centers_df.insert(0, 'Mağaza Sayısı', cluster_counts)
 
                 st.dataframe(
-                    centers_df.style.background_gradient(cmap='Blues', subset=selected_metrics),
+                    centers_df,
                     use_container_width=True,
                     height=400
                 )
@@ -612,10 +676,7 @@ def main():
 
             # Tablo
             st.dataframe(
-                filtered_df.style.applymap(
-                    lambda x: f'background-color: {CLUSTER_COLORS[x % len(CLUSTER_COLORS)]}22' if isinstance(x, (int, np.integer)) and 'Cluster' in str(x) else '',
-                    subset=['Cluster']
-                ),
+                filtered_df,
                 use_container_width=True,
                 height=500
             )
@@ -624,30 +685,76 @@ def main():
 
             # Export
             st.markdown("---")
-            col_exp1, col_exp2, col_exp3 = st.columns([1, 1, 2])
+            st.markdown("### 📥 Rapor İndir")
+            st.info("Orijinal verilerinizin yanına **Cluster** ve **Cluster_Adı** kolonları eklenerek indirilir.")
+
+            col_exp1, col_exp2, col_exp3 = st.columns([1, 1, 1])
+
+            # Cluster adları ekle
+            cluster_names = {
+                0: "Grup A", 1: "Grup B", 2: "Grup C", 3: "Grup D", 4: "Grup E",
+                5: "Grup F", 6: "Grup G", 7: "Grup H", 8: "Grup I", 9: "Grup J"
+            }
+
+            # Tam rapor oluştur (orijinal veri + cluster bilgileri)
+            full_report = df.copy()
+            full_report['Cluster'] = clusters
+            full_report['Cluster_Adı'] = [cluster_names.get(c, f"Grup {c}") for c in clusters]
+
+            # Silhouette değerlendirmesi
+            quality_label, _, quality_desc = evaluate_silhouette(silhouette)
 
             with col_exp1:
-                # Excel export
+                # Excel export - detaylı rapor
                 buffer = io.BytesIO()
                 with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-                    filtered_df.to_excel(writer, index=False, sheet_name='Mağaza Grupları')
-                    cluster_profiles.to_excel(writer, sheet_name='Cluster Profilleri')
+                    # Orijinal veri + cluster
+                    full_report.to_excel(writer, index=False, sheet_name='Veri ve Gruplar')
+
+                    # Cluster profilleri
+                    cluster_profiles_export = df_result.groupby('Cluster')[selected_metrics].mean().round(2)
+                    cluster_profiles_export.insert(0, 'Mağaza_Sayısı', df_result['Cluster'].value_counts().sort_index())
+                    cluster_profiles_export.to_excel(writer, sheet_name='Cluster Profilleri')
+
+                    # Özet bilgiler
+                    summary_df = pd.DataFrame({
+                        'Metrik': ['Toplam Mağaza', 'Cluster Sayısı', 'Silhouette Score', 'Gruplama Kalitesi', 'Kullanılan Metrikler'],
+                        'Değer': [len(df), n_clusters, f"{silhouette:.3f}", quality_label, ', '.join(selected_metrics)]
+                    })
+                    summary_df.to_excel(writer, index=False, sheet_name='Analiz Özeti')
 
                 st.download_button(
-                    label="📥 Excel İndir",
+                    label="📥 Excel Rapor",
                     data=buffer.getvalue(),
-                    file_name=f"magaza_gruplama_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    file_name=f"magaza_gruplama_rapor_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True
                 )
 
             with col_exp2:
-                # CSV export
-                csv = filtered_df.to_csv(index=False).encode('utf-8-sig')
+                # CSV export - sadece veri + cluster
+                csv = full_report.to_csv(index=False).encode('utf-8-sig')
                 st.download_button(
-                    label="📥 CSV İndir",
+                    label="📥 CSV Rapor",
                     data=csv,
-                    file_name=f"magaza_gruplama_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
-                    mime="text/csv"
+                    file_name=f"magaza_gruplama_rapor_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
+
+            with col_exp3:
+                # Sadece filtrelenmiş veri
+                filtered_report = full_report[full_report['Cluster'].isin(selected_clusters)]
+                if search_text and name_col:
+                    filtered_report = filtered_report[filtered_report[name_col].str.contains(search_text, case=False, na=False)]
+
+                csv_filtered = filtered_report.to_csv(index=False).encode('utf-8-sig')
+                st.download_button(
+                    label="📥 Filtrelenmiş CSV",
+                    data=csv_filtered,
+                    file_name=f"magaza_gruplama_filtreli_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+                    mime="text/csv",
+                    use_container_width=True
                 )
     else:
         st.info("👆 Sol panelden ayarları yapıp 'Gruplama Yap' butonuna tıklayın")
