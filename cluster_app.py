@@ -18,7 +18,7 @@ st.set_page_config(page_title="Cluster Analizi", page_icon="📊", layout="wide"
 st.markdown("""
 <style>
     /* Genel ayarlar */
-    .block-container { padding: 1rem 2rem; }
+    .block-container { padding: 3rem 2rem 1rem 2rem; }
 
     /* Başlık stilleri */
     .section-header {
