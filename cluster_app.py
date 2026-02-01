@@ -276,11 +276,11 @@ def main():
                 key='u_urun'
             )
 
-            # Kategori kolonu (string/categorical)
-            cat_options = [c for c in cat_cols_u if c not in [urun_magaza_col, urun_urun_col]]
+            # Kategori kolonu (string/categorical) — sadece Mağaza kolonu hariç
+            cat_options = [c for c in cat_cols_u if c != urun_magaza_col]
             if not cat_options:
                 cat_options = [c for c in all_cols_u
-                               if c not in [urun_magaza_col, urun_urun_col] + numeric_cols_u]
+                               if c != urun_magaza_col and c not in numeric_cols_u]
 
             if cat_options:
                 urun_kategori_col = st.selectbox(
