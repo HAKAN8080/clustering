@@ -19,6 +19,150 @@ st.markdown("""
 <style>
     .block-cluster { padding: 2.5rem 1.5rem 1rem 1.5rem; }
 
+    /* ── SPLASH OVERLAY ─────────────────────────────────────────────── */
+    .splash-overlay {
+        position: fixed; inset: 0; z-index: 9999;
+        background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%);
+        display: flex; flex-direction: column;
+        align-items: center; justify-content: center;
+        animation: splashFadeOut 0.6s ease 3s forwards;
+        pointer-events: none;
+    }
+    @keyframes splashFadeOut {
+        0%   { opacity: 1; transform: scale(1); }
+        100% { opacity: 0; transform: scale(1.05); pointer-events: none; }
+    }
+
+    /* Splash title */
+    .splash-title {
+        font-family: 'Segoe UI', sans-serif;
+        font-size: 2.6rem; font-weight: 700;
+        color: #fff; letter-spacing: 2px;
+        text-align: center; z-index: 2;
+        animation: titlePop 0.7s cubic-bezier(0.34,1.56,0.64,1) 0.3s both;
+    }
+    .splash-title span { color: #60a5fa; }
+    @keyframes titlePop {
+        0%   { opacity: 0; transform: translateY(30px) scale(0.85); }
+        100% { opacity: 1; transform: translateY(0) scale(1); }
+    }
+
+    .splash-sub {
+        font-size: 0.95rem; color: #64748b;
+        margin-top: 8px; z-index: 2; letter-spacing: 3px;
+        text-transform: uppercase;
+        animation: titlePop 0.7s cubic-bezier(0.34,1.56,0.64,1) 0.55s both;
+    }
+
+    /* Dot ring spinner */
+    .splash-ring {
+        width: 140px; height: 140px;
+        margin-bottom: 36px; position: relative; z-index: 2;
+    }
+    .splash-ring .dot {
+        width: 12px; height: 12px; border-radius: 50%;
+        position: absolute; top: 50%; left: 50%;
+        transform-origin: 0 0;
+    }
+    .splash-ring .dot:nth-child(1)  { background:#60a5fa; transform: rotate(0deg)   translate(58px,-6px); animation: spinDot 1.8s ease-in-out infinite 0s; }
+    .splash-ring .dot:nth-child(2)  { background:#818cf8; transform: rotate(36deg)  translate(58px,-6px); animation: spinDot 1.8s ease-in-out infinite 0.1s; }
+    .splash-ring .dot:nth-child(3)  { background:#a78bfa; transform: rotate(72deg)  translate(58px,-6px); animation: spinDot 1.8s ease-in-out infinite 0.2s; }
+    .splash-ring .dot:nth-child(4)  { background:#c084fc; transform: rotate(108deg) translate(58px,-6px); animation: spinDot 1.8s ease-in-out infinite 0.3s; }
+    .splash-ring .dot:nth-child(5)  { background:#e879f9; transform: rotate(144deg) translate(58px,-6px); animation: spinDot 1.8s ease-in-out infinite 0.4s; }
+    .splash-ring .dot:nth-child(6)  { background:#f472b6; transform: rotate(180deg) translate(58px,-6px); animation: spinDot 1.8s ease-in-out infinite 0.5s; }
+    .splash-ring .dot:nth-child(7)  { background:#fb923c; transform: rotate(216deg) translate(58px,-6px); animation: spinDot 1.8s ease-in-out infinite 0.6s; }
+    .splash-ring .dot:nth-child(8)  { background:#facc15; transform: rotate(252deg) translate(58px,-6px); animation: spinDot 1.8s ease-in-out infinite 0.7s; }
+    .splash-ring .dot:nth-child(9)  { background:#4ade80; transform: rotate(288deg) translate(58px,-6px); animation: spinDot 1.8s ease-in-out infinite 0.8s; }
+    .splash-ring .dot:nth-child(10) { background:#22d3ee; transform: rotate(324deg) translate(58px,-6px); animation: spinDot 1.8s ease-in-out infinite 0.9s; }
+    @keyframes spinDot {
+        0%, 100% { opacity: 0.25; transform: rotate(var(--r, 0deg)) translate(58px,-6px) scale(0.7); }
+        50%      { opacity: 1;    transform: rotate(var(--r, 0deg)) translate(58px,-6px) scale(1.2); }
+    }
+
+    /* Floating background particles */
+    .splash-particles { position: absolute; inset: 0; overflow: hidden; }
+    .splash-particles .p {
+        position: absolute; border-radius: 50%;
+        opacity: 0; animation: floatUp linear infinite;
+    }
+    .splash-particles .p:nth-child(1)  { width:4px;  height:4px;  left:10%; background:#60a5fa55; animation-duration:6s; animation-delay:0s; }
+    .splash-particles .p:nth-child(2)  { width:6px;  height:6px;  left:25%; background:#818cf855; animation-duration:8s; animation-delay:1s; }
+    .splash-particles .p:nth-child(3)  { width:3px;  height:3px;  left:40%; background:#a78bfa55; animation-duration:5s; animation-delay:0.5s; }
+    .splash-particles .p:nth-child(4)  { width:5px;  height:5px;  left:55%; background:#4ade8055; animation-duration:7s; animation-delay:2s; }
+    .splash-particles .p:nth-child(5)  { width:4px;  height:4px;  left:70%; background:#f472b655; animation-duration:6.5s; animation-delay:0.8s; }
+    .splash-particles .p:nth-child(6)  { width:7px;  height:7px;  left:82%; background:#60a5fa44; animation-duration:9s; animation-delay:1.5s; }
+    .splash-particles .p:nth-child(7)  { width:3px;  height:3px;  left:92%; background:#22d3ee55; animation-duration:5.5s; animation-delay:0.3s; }
+    .splash-particles .p:nth-child(8)  { width:5px;  height:5px;  left:18%; background:#facc1555; animation-duration:7.5s; animation-delay:1.8s; }
+    .splash-particles .p:nth-child(9)  { width:4px;  height:4px;  left:60%; background:#fb923c55; animation-duration:6s; animation-delay:2.5s; }
+    .splash-particles .p:nth-child(10) { width:6px;  height:6px;  left:35%; background:#c084fc55; animation-duration:8.5s; animation-delay:0.2s; }
+    @keyframes floatUp {
+        0%   { opacity: 0; transform: translateY(100vh) rotate(0deg); }
+        10%  { opacity: 1; }
+        90%  { opacity: 1; }
+        100% { opacity: 0; transform: translateY(-120px) rotate(360deg); }
+    }
+
+    /* ── APP HEADER ─────────────────────────────────────────────────── */
+    .app-main-header {
+        background: linear-gradient(135deg, #0f172a 0%, #1e3a5f 40%, #2F5496 100%);
+        border-radius: 12px;
+        padding: 22px 28px;
+        margin-bottom: 18px;
+        position: relative;
+        overflow: hidden;
+        box-shadow: 0 4px 24px rgba(15,23,42,0.25);
+    }
+    .app-main-header::before {
+        content: '';
+        position: absolute; top: -40%; right: -10%;
+        width: 280px; height: 280px;
+        background: radial-gradient(circle, rgba(96,165,250,0.15) 0%, transparent 70%);
+        border-radius: 50%;
+    }
+    .app-main-header::after {
+        content: '';
+        position: absolute; bottom: -30%; left: 20%;
+        width: 180px; height: 180px;
+        background: radial-gradient(circle, rgba(139,92,246,0.12) 0%, transparent 70%);
+        border-radius: 50%;
+    }
+    .app-main-header h1 {
+        font-family: 'Segoe UI', sans-serif;
+        font-size: 1.65rem; font-weight: 700;
+        color: #fff; margin: 0; position: relative; z-index: 1;
+        letter-spacing: 0.5px;
+    }
+    .app-main-header h1 span { color: #60a5fa; }
+    .app-main-header .header-sub {
+        font-size: 0.82rem; color: #64748b;
+        margin-top: 4px; position: relative; z-index: 1;
+        letter-spacing: 1.5px; text-transform: uppercase;
+    }
+    .header-badge-row {
+        position: absolute; top: 50%; right: 28px;
+        transform: translateY(-50%); z-index: 1;
+        display: flex; gap: 8px; align-items: center;
+    }
+    .hdr-badge {
+        font-size: 10px; font-weight: 700; letter-spacing: 1px;
+        padding: 4px 10px; border-radius: 20px;
+    }
+    .hdr-badge.top { background: rgba(74,222,128,0.2); color: #4ade80; border: 1px solid rgba(74,222,128,0.3); }
+    .hdr-badge.mid { background: rgba(250,204,21,0.2); color: #facc15; border: 1px solid rgba(250,204,21,0.3); }
+    .hdr-badge.all { background: rgba(244,114,182,0.2); color: #f472b6; border: 1px solid rgba(244,114,182,0.3); }
+
+    /* ── EMPTY STATE ────────────────────────────────────────────────── */
+    .empty-state-wrap {
+        text-align: center; padding: 40px 20px 30px;
+    }
+    .empty-state-wrap .empty-title {
+        font-size: 1.1rem; font-weight: 600; color: #1e293b;
+        margin-top: 16px; margin-bottom: 4px;
+    }
+    .empty-state-wrap .empty-sub {
+        font-size: 0.82rem; color: #64748b;
+    }
+
     .section-header {
         background: #C00000;
         color: white;
@@ -182,13 +326,119 @@ def get_kapasite_label(grup_num, total):
             return 'MID'
 
 
+def render_splash():
+    """Sadece ilk yükleme — session'a flag koy"""
+    if 'splash_shown' not in st.session_state:
+        st.session_state.splash_shown = True
+        st.markdown("""
+        <div class="splash-overlay">
+            <div class="splash-particles">
+                <div class="p"></div><div class="p"></div><div class="p"></div>
+                <div class="p"></div><div class="p"></div><div class="p"></div>
+                <div class="p"></div><div class="p"></div><div class="p"></div>
+                <div class="p"></div>
+            </div>
+            <div class="splash-ring">
+                <div class="dot"></div><div class="dot"></div><div class="dot"></div>
+                <div class="dot"></div><div class="dot"></div><div class="dot"></div>
+                <div class="dot"></div><div class="dot"></div><div class="dot"></div>
+                <div class="dot"></div>
+            </div>
+            <div class="splash-title">KMeans <span>Cluster</span></div>
+            <div class="splash-sub">3D Analitik Platforma Hoş Geldiniz</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+
+def render_demo_3d():
+    """Boş state'te demo animated 3D scatter — gerçek veri olmadan"""
+    np.random.seed(42)
+    n = 120
+    # 3 küme oluştur
+    c1 = np.random.randn(n, 3) * 12 + np.array([30, 20, 50])
+    c2 = np.random.randn(n, 3) * 10 + np.array([70, 60, 25])
+    c3 = np.random.randn(n, 3) * 11 + np.array([50, 80, 70])
+
+    labels = (['TOP-1-A'] * n) + (['MID-2-B'] * n) + (['ALL-3-C'] * n)
+    xs = np.concatenate([c1[:, 0], c2[:, 0], c3[:, 0]])
+    ys = np.concatenate([c1[:, 1], c2[:, 1], c3[:, 1]])
+    zs = np.concatenate([c1[:, 2], c2[:, 2], c3[:, 2]])
+
+    import plotly.graph_objects as go
+
+    colors = {'TOP-1-A': '#60a5fa', 'MID-2-B': '#4ade80', 'ALL-3-C': '#f472b6'}
+    fig = go.Figure()
+    for label in ['TOP-1-A', 'MID-2-B', 'ALL-3-C']:
+        mask = np.array([l == label for l in labels])
+        fig.add_trace(go.Scatter3d(
+            x=xs[mask], y=ys[mask], z=zs[mask],
+            mode='markers', name=label,
+            marker=dict(size=5, color=colors[label], opacity=0.75,
+                        line=dict(width=0.5, color='white'))
+        ))
+
+    fig.update_layout(
+        height=380,
+        scene=dict(
+            xaxis_title='Kapasite', yaxis_title='Ürün Performans', zaxis_title='Fiyat',
+            xaxis=dict(backgroundcolor='#1e293b', gridcolor='#334155', zerolinecolor='#334155'),
+            yaxis=dict(backgroundcolor='#1e293b', gridcolor='#334155', zerolinecolor='#334155'),
+            zaxis=dict(backgroundcolor='#1e293b', gridcolor='#334155', zerolinecolor='#334155'),
+            camera=dict(eye=dict(x=1.4, y=1.2, z=0.9))
+        ),
+        paper_bgcolor='#0f172a',
+        plot_bgcolor='#0f172a',
+        font=dict(color='#94a3b8', size=11),
+        legend=dict(orientation='h', x=0.5, xanchor='center', y=-0.08,
+                    font=dict(size=11), bgcolor='rgba(15,23,42,0)'),
+        margin=dict(l=0, r=0, t=10, b=40)
+    )
+    # Auto-rotate JS inject
+    st.plotly_chart(fig, use_container_width=True)
+    st.markdown("""
+    <script>
+    (function(){
+        var plots = document.querySelectorAll('.plotly');
+        plots.forEach(function(p){
+            var el = p.querySelector('.js-plotly-plot') || p;
+            if(window.Plotly && el && el._fullLayout){
+                var angle = 0;
+                setInterval(function(){
+                    angle += 2;
+                    var rad = angle * Math.PI / 180;
+                    var eye = { x: 1.8*Math.cos(rad), y: 1.8*Math.sin(rad), z: 0.7 };
+                    window.Plotly.relayout(el, {scene:{camera:{eye:eye}}});
+                }, 80);
+            }
+        });
+    })();
+    </script>
+    """, unsafe_allow_html=True)
+
+
 # ─── MAIN ────────────────────────────────────────────────────────────────────
 
 def main():
+    # Splash — sadece ilk yükleme
+    render_splash()
+
     # Session state init
     for key in ['kapasite_df', 'urun_df', 'kapasite_results', 'final_results', 'config']:
         if key not in st.session_state:
             st.session_state[key] = None
+
+    # ── Ana Başlık ───────────────────────────────────────────────────────────
+    st.markdown("""
+    <div class="app-main-header">
+        <h1>📊 KMeans <span>Cluster</span> Analizi</h1>
+        <div class="header-sub">Mağaza · Ürün · Fiyat &nbsp;|&nbsp; 3D Per-Kategori Gruplama</div>
+        <div class="header-badge-row">
+            <span class="hdr-badge top">TOP</span>
+            <span class="hdr-badge mid">MID</span>
+            <span class="hdr-badge all">ALL</span>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
     col_left, col_right = st.columns([1, 2.5])
 
@@ -648,7 +898,14 @@ def main():
                 st.dataframe(filtered[show_cols], height=420, use_container_width=True)
 
         else:
-            st.info("👈 Sol panelden verileri yükleyin ve 'Grupla ve Birleştir' butonuna tıklayın.")
+            # Demo 3D animasyon + yönlendirme
+            st.markdown("""
+            <div class="empty-state-wrap">
+                <div class="empty-title">📈 Demo — Örnek 3D Cluster Görünümü</div>
+                <div class="empty-sub">Sol panelden veri yüklediğinizde gerçek analiz başlayacak</div>
+            </div>
+            """, unsafe_allow_html=True)
+            render_demo_3d()
 
 
 if __name__ == "__main__":
