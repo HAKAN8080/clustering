@@ -1,6 +1,11 @@
 """
 Cluster Analizi — Mağaza Kapasite + Ürün + Fiyat (3D)
 Per-Kategori Gruplama | TOP-1-A Format
+
+Clustering Metodları:
+1. K-Means Clustering: Makine öğrenmesi tabanlı kümeleme
+2. Experiential Scoring: Her ekseni ayrı 3 kümeye böl, ağırlıklı skor hesapla, 9 kümeye ayır
+   Skor = X_küme × w_x + Y_küme × w_y + Z_küme × w_z → TOP1...ALL3 (9 küme)
 """
 
 import os
@@ -15,7 +20,7 @@ from sklearn.preprocessing import StandardScaler
 import io
 from datetime import datetime
 
-st.set_page_config(page_title="Cluster Analizi 3D", page_icon="📊", layout="wide")
+st.set_page_config(page_title="3D Cluster Analizi", page_icon="📊", layout="wide")
 
 # ─── CSS ────────────────────────────────────────────────────────────────────
 st.markdown("""
@@ -365,6 +370,86 @@ def compute_unified_groups(df, kap_x_cols, urun_metric_col, urun_fiyat_col,
     return score, unified
 
 
+def assign_experiential_cluster(values, n_clusters=3, desc=True):
+    """
+    Experiential Scoring için tek bir ekseni n_clusters kümeye böl.
+    Quantile tabanlı bölme yapar (eşit sayıda eleman her grupta).
+    desc=True → yüksek değer = küme 1 (TOP)
+    desc=False → düşük değer = küme 1
+    Döndürür: 1, 2, 3, ... şeklinde küme numaraları
+    """
+    values = pd.Series(values).fillna(pd.Series(values).mean())
+
+    # Quantile tabanlı kümeleme
+    try:
+        clusters = pd.qcut(values, q=n_clusters, labels=False, duplicates='drop')
+        actual_clusters = clusters.max() + 1
+    except ValueError:
+        # Yeterli unique değer yoksa
+        clusters = pd.Series([0] * len(values))
+        actual_clusters = 1
+
+    if desc:
+        # Yüksek değer = 1 (TOP)
+        clusters = actual_clusters - clusters
+    else:
+        # Düşük değer = 1
+        clusters = clusters + 1
+
+    return clusters.values
+
+
+def experiential_scoring_clustering(df, kap_x_cols, urun_metric_col, urun_fiyat_col,
+                                     w_kap, w_urun, w_fiyat, n_clusters=3, desc=True):
+    """
+    Experiential Scoring Clustering Method:
+    1. Her ekseni (X, Y, Z) ayrı ayrı 3 kümeye böl (1, 2, 3)
+    2. Ağırlıklı ortalama hesapla: weighted_avg = x_küme * w_x + y_küme * w_y + z_küme * w_z
+    3. Bu skoru 9 kümeye böl: TOP1, TOP2, TOP3, MID1, MID2, MID3, ALL1, ALL2, ALL3
+
+    Örnek: x_küme=2, y_küme=1, z_küme=2, ağırlıklar=%30,%40,%30
+    weighted_avg = 2*0.3 + 1*0.4 + 2*0.3 = 1.6
+    Final küme index = round((1.6 - 1) / 2 * 8) = round(2.4) = 2 → TOP3
+    """
+    # Kapasite X değeri (birden fazla kolon varsa ortalama)
+    kap_values = df[kap_x_cols].fillna(0).mean(axis=1).values
+    urun_values = df[urun_metric_col].fillna(0).values
+    fiyat_values = df[urun_fiyat_col].fillna(0).values
+
+    # Her ekseni ayrı ayrı 3 kümeye böl (1, 2, 3)
+    kap_clusters = assign_experiential_cluster(kap_values, n_clusters, desc)
+    urun_clusters = assign_experiential_cluster(urun_values, n_clusters, desc)
+    fiyat_clusters = assign_experiential_cluster(fiyat_values, n_clusters, desc)
+
+    # Ağırlıkları normalize et
+    total_w = w_kap + w_urun + w_fiyat
+    if total_w == 0:
+        total_w = 1.0
+    w_kap_n = w_kap / total_w
+    w_urun_n = w_urun / total_w
+    w_fiyat_n = w_fiyat / total_w
+
+    # Ağırlıklı ortalama (1 ile 3 arasında değer)
+    weighted_score = (kap_clusters * w_kap_n +
+                      urun_clusters * w_urun_n +
+                      fiyat_clusters * w_fiyat_n)
+
+    # Ağırlıklı skoru 9 kümeye böl (0-8 arası index)
+    # weighted_score: 1.0 (min) - 3.0 (max) aralığında
+    # (score - 1) / 2 → 0.0 - 1.0 aralığına normalize
+    # * 8 → 0 - 8 aralığına scale
+    normalized = (weighted_score - 1.0) / 2.0  # 0-1 arası
+    cluster_index = np.round(normalized * 8).astype(int)
+    cluster_index = np.clip(cluster_index, 0, 8)
+
+    # 9 grup: TOP1 (en yüksek) → ALL3 (en düşük)
+    group_order = ['TOP1', 'TOP2', 'TOP3', 'MID1', 'MID2', 'MID3', 'ALL1', 'ALL2', 'ALL3']
+    unified_labels = np.array([group_order[i] for i in cluster_index])
+
+    return (weighted_score, unified_labels,
+            kap_clusters, urun_clusters, fiyat_clusters)
+
+
 def render_splash():
     """Sadece ilk yükleme — session'a flag koy"""
     if 'splash_shown' not in st.session_state:
@@ -383,8 +468,8 @@ def render_splash():
                 <div class="dot"></div><div class="dot"></div><div class="dot"></div>
                 <div class="dot"></div>
             </div>
-            <div class="splash-title">KMeans <span>Cluster</span></div>
-            <div class="splash-sub">3D Analitik Platforma Hoş Geldiniz</div>
+            <div class="splash-title">3D <span>Cluster</span> Analizi</div>
+            <div class="splash-sub">K-Means & Experiential Scoring</div>
         </div>
         """, unsafe_allow_html=True)
 
@@ -469,8 +554,8 @@ def main():
     # ── Ana Başlık ───────────────────────────────────────────────────────────
     st.markdown("""
     <div class="app-main-header">
-        <h1>📊 KMeans <span>Cluster</span> Analizi</h1>
-        <div class="header-sub">Mağaza · Ürün · Fiyat &nbsp;|&nbsp; 3D Per-Kategori Gruplama</div>
+        <h1>📊 3D <span>Cluster</span> Analizi</h1>
+        <div class="header-sub">Mağaza · Ürün · Fiyat &nbsp;|&nbsp; K-Means & Experiential Scoring</div>
         <div class="header-badge-row">
             <span class="hdr-badge top">TOP</span>
             <span class="hdr-badge mid">MID</span>
@@ -617,6 +702,18 @@ def main():
 
         st.markdown("<hr>", unsafe_allow_html=True)
 
+        # ─── CLUSTERING METODU ───────────────────────────────────────────────
+        st.markdown('<div class="section-header">🧮 Clustering Metodu</div>',
+                    unsafe_allow_html=True)
+        clustering_method = st.selectbox(
+            "Metod Seçin",
+            options=['K-Means Clustering', 'Experiential Scoring'],
+            key='clustering_method',
+            help="K-Means: Makine öğrenmesi tabanlı kümeleme\nExperiential Scoring: Her ekseni ayrı böl, ağırlıklı ortalamayla final küme hesapla"
+        )
+
+        st.markdown("<hr>", unsafe_allow_html=True)
+
         # ─── SIRALAMA TERCİHİ ────────────────────────────────────────────────
         st.markdown('<div class="section-header">🔃 Sıralama Yönü</div>',
                     unsafe_allow_html=True)
@@ -707,13 +804,33 @@ def main():
 
                 # ── STEP 5: Ağırlıklı Birleşik Gruplama ─────────────────────
                 kap_x_cols_list = [f'_Kap_X_{c}' for c in kap_attrs]
-                score, unified = compute_unified_groups(
-                    urun_df, kap_x_cols_list,
-                    urun_metric_col, urun_fiyat_col,
-                    w_kapasite, w_urun, w_fiyat
-                )
-                urun_df['Agirlikli_Skor'] = score
-                urun_df['Birlesik_Grup'] = unified
+
+                if clustering_method == 'K-Means Clustering':
+                    # K-Means tabanlı birleşik gruplama
+                    score, unified = compute_unified_groups(
+                        urun_df, kap_x_cols_list,
+                        urun_metric_col, urun_fiyat_col,
+                        w_kapasite, w_urun, w_fiyat
+                    )
+                    urun_df['Agirlikli_Skor'] = score
+                    urun_df['Birlesik_Grup'] = unified
+                    urun_df['Exp_Kap_Kume'] = None
+                    urun_df['Exp_Urun_Kume'] = None
+                    urun_df['Exp_Fiyat_Kume'] = None
+                else:
+                    # Experiential Scoring tabanlı birleşik gruplama
+                    (score, unified,
+                     exp_kap, exp_urun, exp_fiyat) = experiential_scoring_clustering(
+                        urun_df, kap_x_cols_list,
+                        urun_metric_col, urun_fiyat_col,
+                        w_kapasite, w_urun, w_fiyat,
+                        n_clusters=3, desc=desc_order
+                    )
+                    urun_df['Agirlikli_Skor'] = score
+                    urun_df['Birlesik_Grup'] = unified
+                    urun_df['Exp_Kap_Kume'] = exp_kap
+                    urun_df['Exp_Urun_Kume'] = exp_urun
+                    urun_df['Exp_Fiyat_Kume'] = exp_fiyat
 
                 # ── Session'a kaydet ──────────────────────────────────────────
                 st.session_state.final_results = urun_df
@@ -731,6 +848,7 @@ def main():
                     'w_kapasite':        w_kapasite,
                     'w_urun':            w_urun,
                     'w_fiyat':           w_fiyat,
+                    'clustering_method': clustering_method,
                 }
 
                 if unmatched > 0:
@@ -760,15 +878,32 @@ def main():
             kap_x_labels      = cfg['kap_x_labels']
 
             # ── Legenda ──────────────────────────────────────────────────────
-            st.markdown("""
-            <div class="legend-box">
-                <b>Format → TOP-1-A</b><br>
-                <b>TOP / MID / ALL</b> — Mağaza Kapasite grubu (global, ürün bağımsız)<br>
-                <b>1 / 2 / 3</b>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;— Ürün Performans grubu (<i>her kategori içinde ayrı</i>)<br>
-                <b>A / B / C</b>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;— Fiyat Seviyesi grubu&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(<i>her kategori içinde ayrı</i>)<br>
-                Tüm boyutlarda <b>düşük → yüksek</b> sıralama yapılır.
-            </div>
-            """, unsafe_allow_html=True)
+            method_name = cfg.get('clustering_method', 'K-Means Clustering')
+            if method_name == 'K-Means Clustering':
+                st.markdown("""
+                <div class="legend-box">
+                    <b>Metod: K-Means Clustering</b><br>
+                    <b>Format → TOP-1-A</b><br>
+                    <b>TOP / MID / ALL</b> — Mağaza Kapasite grubu (global, ürün bağımsız)<br>
+                    <b>1 / 2 / 3</b>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;— Ürün Performans grubu (<i>her kategori içinde ayrı</i>)<br>
+                    <b>A / B / C</b>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;— Fiyat Seviyesi grubu&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(<i>her kategori içinde ayrı</i>)<br>
+                    Birleşik grup: Ağırlıklı skor üzerinden K-Means ile 9 grup (TOP1...ALL3)
+                </div>
+                """, unsafe_allow_html=True)
+            else:
+                st.markdown(f"""
+                <div class="legend-box">
+                    <b>Metod: Experiential Scoring</b><br>
+                    <b>Format → TOP-1-A</b><br>
+                    <b>TOP / MID / ALL</b> — Mağaza Kapasite grubu (global, ürün bağımsız)<br>
+                    <b>1 / 2 / 3</b>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;— Ürün Performans grubu (<i>her kategori içinde ayrı</i>)<br>
+                    <b>A / B / C</b>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;— Fiyat Seviyesi grubu&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(<i>her kategori içinde ayrı</i>)<br>
+                    <hr style="margin:5px 0; border-color:#ddd;">
+                    <b>Birleşik Grup (9 Küme):</b> Her eksen ayrı 3 kümeye bölünür (1,2,3), sonra:<br>
+                    Skor = X_küme × {cfg['w_kapasite']:.0%} + Y_küme × {cfg['w_urun']:.0%} + Z_küme × {cfg['w_fiyat']:.0%}<br>
+                    → TOP1, TOP2, TOP3, MID1, MID2, MID3, ALL1, ALL2, ALL3
+                </div>
+                """, unsafe_allow_html=True)
 
             # ── Kategori filter + X-eksen seçimi ─────────────────────────────
             kategoriler = sorted(results[urun_kategori_col].unique())
