@@ -156,9 +156,9 @@ st.markdown("""
         font-size: 10px; font-weight: 700; letter-spacing: 1px;
         padding: 4px 10px; border-radius: 20px;
     }
-    .hdr-badge.top { background: rgba(74,222,128,0.2); color: #4ade80; border: 1px solid rgba(74,222,128,0.3); }
-    .hdr-badge.mid { background: rgba(250,204,21,0.2); color: #facc15; border: 1px solid rgba(250,204,21,0.3); }
-    .hdr-badge.all { background: rgba(244,114,182,0.2); color: #f472b6; border: 1px solid rgba(244,114,182,0.3); }
+    .hdr-badge.g1 { background: rgba(74,222,128,0.2); color: #4ade80; border: 1px solid rgba(74,222,128,0.3); }
+    .hdr-badge.g2 { background: rgba(250,204,21,0.2); color: #facc15; border: 1px solid rgba(250,204,21,0.3); }
+    .hdr-badge.g3 { background: rgba(244,114,182,0.2); color: #f472b6; border: 1px solid rgba(244,114,182,0.3); }
 
     /* ── EMPTY STATE ────────────────────────────────────────────────── */
     .empty-state-wrap {
@@ -249,9 +249,13 @@ st.markdown("""
 
 def load_data(uploaded_file):
     """Excel / CSV yükle"""
-    if uploaded_file.name.endswith('.csv'):
-        return pd.read_csv(uploaded_file)
-    return pd.read_excel(uploaded_file)
+    try:
+        if uploaded_file.name.endswith('.csv'):
+            return pd.read_csv(uploaded_file)
+        return pd.read_excel(uploaded_file, engine='openpyxl')
+    except Exception as e:
+        st.error(f"Dosya okuma hatası: {e}")
+        return None
 
 
 def kmeans_global(df, attribute_cols, n_clusters, desc=True):
@@ -259,9 +263,28 @@ def kmeans_global(df, attribute_cols, n_clusters, desc=True):
     Global K-Means — kapasite gruplama (tüm mağazalar üzerinde bir kez).
     desc=True → 1=en büyük (TOP), desc=False → 1=en küçük (ALL)
     """
-    X = df[attribute_cols].fillna(df[attribute_cols].mean())
+    X = df[attribute_cols].copy()
+
+    # NaN değerleri ortalama ile doldur
+    for col in X.columns:
+        col_mean = X[col].mean()
+        if pd.isna(col_mean):
+            col_mean = 0
+        X[col] = X[col].fillna(col_mean)
+
+    # inf değerleri temizle
+    X = X.replace([np.inf, -np.inf], np.nan).fillna(0)
+
+    # Yeterli veri kontrolü
+    if len(X) < n_clusters:
+        return np.ones(len(X), dtype=int)
+
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
+
+    # NaN kontrolü (StandardScaler sonrası)
+    if np.any(np.isnan(X_scaled)) or np.any(np.isinf(X_scaled)):
+        X_scaled = np.nan_to_num(X_scaled, nan=0.0, posinf=0.0, neginf=0.0)
 
     kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
     clusters = kmeans.fit_predict(X_scaled)
@@ -283,7 +306,10 @@ def kmeans_per_category(df, kategori_col, metric_col, n_clusters,
 
     for kategori in df[kategori_col].unique():
         mask = df[kategori_col] == kategori
-        subset = df.loc[mask, metric_col]
+        subset = df.loc[mask, metric_col].copy()
+
+        # inf değerleri NaN yap
+        subset = subset.replace([np.inf, -np.inf], np.nan)
 
         # Yeterli veri kontrolü
         non_null = subset.dropna()
@@ -296,15 +322,27 @@ def kmeans_per_category(df, kategori_col, metric_col, n_clusters,
             result.loc[mask] = 1 if label_type == 'numeric' else 'A'
             continue
 
-        X = subset.fillna(subset.mean()).values.reshape(-1, 1)
+        # NaN'ları ortalama ile doldur
+        fill_value = subset.mean()
+        if pd.isna(fill_value):
+            fill_value = 0
+        X = subset.fillna(fill_value).values.reshape(-1, 1)
+
+        # inf kontrolü
+        X = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)
+
         scaler = StandardScaler()
         X_scaled = scaler.fit_transform(X)
+
+        # StandardScaler sonrası NaN kontrolü
+        X_scaled = np.nan_to_num(X_scaled, nan=0.0, posinf=0.0, neginf=0.0)
 
         kmeans = KMeans(n_clusters=actual_clusters, random_state=42, n_init=10)
         clusters = kmeans.fit_predict(X_scaled)
 
         # Düşük → yüksek sıralama (clusters zaten subset boyutunda)
-        means = {c: subset.values[clusters == c].mean() for c in range(actual_clusters)}
+        cluster_values = subset.fillna(fill_value).values
+        means = {c: cluster_values[clusters == c].mean() for c in range(actual_clusters)}
         sorted_c = sorted(means.keys(), key=lambda x: means[x], reverse=desc)
         mapping = {old: new for new, old in enumerate(sorted_c)}
         sorted_clusters = np.array([mapping[c] for c in clusters])
@@ -319,18 +357,8 @@ def kmeans_per_category(df, kategori_col, metric_col, n_clusters,
 
 
 def get_kapasite_label(grup_num, total):
-    """Kapasite grup numarası → TOP / MID / ALL (1=en büyük=TOP)"""
-    if total == 2:
-        return 'TOP' if grup_num == 1 else 'ALL'
-    elif total == 3:
-        return {1: 'TOP', 2: 'MID', 3: 'ALL'}.get(grup_num, str(grup_num))
-    else:
-        if grup_num == 1:
-            return 'TOP'
-        elif grup_num == total:
-            return 'ALL'
-        else:
-            return 'MID'
+    """Kapasite grup numarası → 1, 2, 3 (sayısal)"""
+    return str(grup_num)
 
 
 def assign_experiential_cluster(values, n_clusters=3, desc=True):
@@ -341,13 +369,29 @@ def assign_experiential_cluster(values, n_clusters=3, desc=True):
     desc=False → düşük değer = küme 1
     Döndürür: 1, 2, 3, ... şeklinde küme numaraları
     """
-    values = pd.Series(values).fillna(pd.Series(values).mean())
+    values = pd.Series(values).copy()
+
+    # inf değerleri NaN yap
+    values = values.replace([np.inf, -np.inf], np.nan)
+
+    # NaN'ları ortalama ile doldur
+    fill_value = values.mean()
+    if pd.isna(fill_value):
+        fill_value = 0
+    values = values.fillna(fill_value)
+
+    # Boş veri kontrolü
+    if len(values) == 0:
+        return np.array([1])
 
     # Quantile tabanlı kümeleme
     try:
         clusters = pd.qcut(values, q=n_clusters, labels=False, duplicates='drop')
         actual_clusters = clusters.max() + 1
-    except ValueError:
+        if pd.isna(actual_clusters):
+            actual_clusters = 1
+            clusters = pd.Series([0] * len(values))
+    except (ValueError, TypeError):
         # Yeterli unique değer yoksa
         clusters = pd.Series([0] * len(values))
         actual_clusters = 1
@@ -395,16 +439,16 @@ def render_demo_3d():
     c2 = np.random.randn(n, 3) * 10 + np.array([70, 60, 25])
     c3 = np.random.randn(n, 3) * 11 + np.array([50, 80, 70])
 
-    labels = (['TOP-1-A'] * n) + (['MID-2-B'] * n) + (['ALL-3-C'] * n)
+    labels = (['1-1'] * n) + (['2-2'] * n) + (['3-3'] * n)
     xs = np.concatenate([c1[:, 0], c2[:, 0], c3[:, 0]])
     ys = np.concatenate([c1[:, 1], c2[:, 1], c3[:, 1]])
     zs = np.concatenate([c1[:, 2], c2[:, 2], c3[:, 2]])
 
     import plotly.graph_objects as go
 
-    colors = {'TOP-1-A': '#60a5fa', 'MID-2-B': '#4ade80', 'ALL-3-C': '#f472b6'}
+    colors = {'1-1': '#60a5fa', '2-2': '#4ade80', '3-3': '#f472b6'}
     fig = go.Figure()
-    for label in ['TOP-1-A', 'MID-2-B', 'ALL-3-C']:
+    for label in ['1-1', '2-2', '3-3']:
         mask = np.array([l == label for l in labels])
         fig.add_trace(go.Scatter3d(
             x=xs[mask], y=ys[mask], z=zs[mask],
@@ -463,15 +507,23 @@ def main():
         if key not in st.session_state:
             st.session_state[key] = None
 
+    # Grup isimleri için default değerler
+    if 'grup_isimleri' not in st.session_state:
+        st.session_state.grup_isimleri = {
+            '1-1': 'TOP 1', '1-2': 'TOP 2', '1-3': 'TOP 3',
+            '2-1': 'MID 1', '2-2': 'MID 2', '2-3': 'MID 3',
+            '3-1': 'ALL 1', '3-2': 'ALL 2', '3-3': 'ALL 3'
+        }
+
     # ── Ana Başlık ───────────────────────────────────────────────────────────
     st.markdown("""
     <div class="app-main-header">
         <h1>📊 3D <span>Cluster</span> Analizi</h1>
         <div class="header-sub">Mağaza · Ürün · Fiyat &nbsp;|&nbsp; K-Means & Experiential Scoring</div>
         <div class="header-badge-row">
-            <span class="hdr-badge top">TOP</span>
-            <span class="hdr-badge mid">MID</span>
-            <span class="hdr-badge all">ALL</span>
+            <span class="hdr-badge g1">1-1</span>
+            <span class="hdr-badge g2">2-2</span>
+            <span class="hdr-badge g3">3-3</span>
         </div>
     </div>
     """, unsafe_allow_html=True)
@@ -494,8 +546,12 @@ def main():
         if uploaded_kap:
             file_id = uploaded_kap.name + str(uploaded_kap.size)
             if st.session_state.get('_kap_file_id') != file_id:
-                st.session_state.kapasite_df = load_data(uploaded_kap)
-                st.session_state._kap_file_id = file_id
+                loaded = load_data(uploaded_kap)
+                if loaded is not None:
+                    st.session_state.kapasite_df = loaded
+                    st.session_state._kap_file_id = file_id
+                else:
+                    st.session_state.kapasite_df = None
 
         # Defaults
         kap_label      = None
@@ -548,8 +604,12 @@ def main():
         if uploaded_urun:
             file_id = uploaded_urun.name + str(uploaded_urun.size)
             if st.session_state.get('_urun_file_id') != file_id:
-                st.session_state.urun_df = load_data(uploaded_urun)
-                st.session_state._urun_file_id = file_id
+                loaded = load_data(uploaded_urun)
+                if loaded is not None:
+                    st.session_state.urun_df = loaded
+                    st.session_state._urun_file_id = file_id
+                else:
+                    st.session_state.urun_df = None
 
         # Defaults
         urun_magaza_col   = None
@@ -704,9 +764,17 @@ def main():
         if st.button("🚀 Grupla ve Birleştir",
                       disabled=btn_disabled, use_container_width=True, type="primary"):
             with st.spinner("Gruplama yapılıyor…"):
-
+              try:
                 # ── STEP 1: Kapasite gruplama (GLOBAL K-Means) ──────────────
-                kap_df = st.session_state.kapasite_df.copy()
+                kap_df_raw = st.session_state.kapasite_df.copy()
+
+                # ⚡ MAĞAZA BAZINDA UNIQUE KAPASITE: Aynı mağazanın tekrar eden
+                # satırlarını birleştir (max değeri al)
+                agg_dict = {col: 'max' for col in kap_attrs}
+                kap_df = kap_df_raw.groupby(kap_label, as_index=False).agg(agg_dict)
+
+                st.info(f"📊 {len(kap_df_raw)} satırdan {len(kap_df)} unique mağaza oluşturuldu")
+
                 kap_df['_Kap_Grup_Num'] = kmeans_global(
                     kap_df, kap_attrs, kap_grup_sayisi, desc=desc_order
                 )
@@ -743,11 +811,10 @@ def main():
                         fiyat_grup_sayisi, 'alpha', desc=desc_order
                     )
 
-                    # Kombine Grup → TOP-1-A format
+                    # Kombine Grup → 1-1, 1-2, ... 3-3 format
                     urun_df['Kombine_Grup'] = (
                         urun_df['Kapasite_Grubu'].astype(str) + '-' +
-                        urun_df['Urun_Grubu'].astype(str) + '-' +
-                        urun_df['Fiyat_Grubu'].astype(str)
+                        urun_df['Urun_Grubu'].astype(str)
                     )
 
                     # Session config
@@ -805,7 +872,7 @@ def main():
                     urun_df['Agirlikli_Skor'] = weighted_avg
                     urun_df['Urun_Grubu'] = urun_grubu
 
-                    # Kombine Grup → TOP-1, TOP-2, MID-1, ... ALL-3
+                    # Kombine Grup → 1-1, 1-2, ... 3-3 format
                     urun_df['Kombine_Grup'] = (
                         urun_df['Kapasite_Grubu'].astype(str) + '-' +
                         urun_df['Urun_Grubu'].astype(str)
@@ -834,6 +901,11 @@ def main():
                 else:
                     st.success("✅ Gruplama tamamlandı!")
 
+              except Exception as e:
+                st.error(f"❌ Hesaplama hatası: {str(e)}")
+                import traceback
+                st.code(traceback.format_exc(), language="text")
+
     # ══════════════════════════════════════════════════════════════════════════
     # SAĞ PANEL — SONUÇLAR
     # ══════════════════════════════════════════════════════════════════════════
@@ -861,11 +933,10 @@ def main():
                 st.markdown("""
                 <div class="legend-box">
                     <b>Metod: K-Means Clustering</b><br>
-                    <b>Format → TOP-1-A</b><br>
+                    <b>Format → 1-1, 1-2, ... 3-3</b><br>
                     <hr style="margin:5px 0; border-color:#ddd;">
-                    <b>Kapasite:</b> TOP / MID / ALL — Mağaza grubu (global K-Means)<br>
-                    <b>Ürün Grubu:</b> 1 / 2 / 3 — Per-kategori K-Means<br>
-                    <b>Fiyat Grubu:</b> A / B / C — Per-kategori K-Means
+                    <b>Kapasite Grubu:</b> 1 / 2 / 3 — Mağaza bazlı (global K-Means)<br>
+                    <b>Ürün Grubu:</b> 1 / 2 / 3 — Per-kategori K-Means
                 </div>
                 """, unsafe_allow_html=True)
             else:
@@ -881,15 +952,45 @@ def main():
                 st.markdown(f"""
                 <div class="legend-box">
                     <b>Metod: Experiential Scoring</b><br>
-                    <b>Format → TOP-1, MID-2, ALL-3</b><br>
+                    <b>Format → 1-1, 1-2, ... 3-3</b><br>
                     <hr style="margin:5px 0; border-color:#ddd;">
-                    <b>Kapasite:</b> TOP / MID / ALL — Mağaza grubu (global K-Means)<br>
+                    <b>Kapasite Grubu:</b> 1 / 2 / 3 — Mağaza bazlı (global K-Means)<br>
                     <b>Ürün Grubu:</b> 1 / 2 / 3 — 3 metriğin ağırlıklı ortalaması<br>
                     <hr style="margin:5px 0; border-color:#ddd;">
                     <b>Hesaplama:</b> Her metrik 3 kümeye bölünür, sonra:<br>
                     Ürün Grubu = yuvarlama({metric_names[0]} × {w1/total_w:.0%} + {metric_names[1]} × {w2/total_w:.0%} + {metric_names[2]} × {w3/total_w:.0%})
                 </div>
                 """, unsafe_allow_html=True)
+
+            # ── Elle Grup İsimlendirme ────────────────────────────────────────
+            with st.expander("✏️ Grup İsimlerini Düzenle", expanded=False):
+                st.caption("Her gruba özel isim verin (Excel'de bu isimler kullanılacak)")
+
+                # Mevcut grupları al
+                existing_groups = sorted(results['Kombine_Grup'].unique())
+                group_order = ['1-1', '1-2', '1-3', '2-1', '2-2', '2-3', '3-1', '3-2', '3-3']
+                ordered_groups = [g for g in group_order if g in existing_groups]
+                for g in existing_groups:
+                    if g not in ordered_groups:
+                        ordered_groups.append(g)
+
+                # 3 sütunlu layout
+                cols = st.columns(3)
+                for i, grup in enumerate(ordered_groups):
+                    col_idx = i % 3
+                    with cols[col_idx]:
+                        default_name = st.session_state.grup_isimleri.get(grup, grup)
+                        new_name = st.text_input(
+                            f"Grup {grup}",
+                            value=default_name,
+                            key=f'grup_isim_{grup}',
+                            label_visibility="visible"
+                        )
+                        st.session_state.grup_isimleri[grup] = new_name
+
+                # Grup İsmi kolonunu ekle
+                results['Grup_Ismi'] = results['Kombine_Grup'].map(st.session_state.grup_isimleri)
+                st.session_state.final_results['Grup_Ismi'] = st.session_state.final_results['Kombine_Grup'].map(st.session_state.grup_isimleri)
 
             # ── Kategori filter + X-eksen seçimi ─────────────────────────────
             kategoriler = sorted(results[urun_kategori_col].unique())
@@ -1022,15 +1123,13 @@ def main():
                 kap_stat_col = kap_x_cols[0]
                 kap_stat_name = kap_x_labels.get(kap_stat_col, kap_stat_col)
 
-            # Grup sırası metoda göre
-            if method == 'K-Means Clustering':
-                # TOP-1-A, TOP-1-B, ... ALL-3-C
-                all_groups = sorted(filtered['Kombine_Grup'].unique())
-            else:
-                # TOP-1, TOP-2, TOP-3, MID-1, ... ALL-3
-                group_order = ['TOP-1', 'TOP-2', 'TOP-3', 'MID-1', 'MID-2', 'MID-3',
-                               'ALL-1', 'ALL-2', 'ALL-3']
-                all_groups = [g for g in group_order if g in filtered['Kombine_Grup'].values]
+            # Grup sırası: 1-1, 1-2, 1-3, 2-1, 2-2, 2-3, 3-1, 3-2, 3-3
+            group_order = ['1-1', '1-2', '1-3', '2-1', '2-2', '2-3', '3-1', '3-2', '3-3']
+            all_groups = [g for g in group_order if g in filtered['Kombine_Grup'].values]
+            # Eğer farklı gruplar varsa ekle
+            for g in sorted(filtered['Kombine_Grup'].unique()):
+                if g not in all_groups:
+                    all_groups.append(g)
 
             summary_rows = []
             for grp in all_groups:
@@ -1042,8 +1141,12 @@ def main():
 
                 kv = grp_data[kap_stat_col]
 
+                # Grup ismini al
+                grup_ismi = st.session_state.grup_isimleri.get(grp, grp)
+
                 row = {
                     'Grup': grp,
+                    'Grup İsmi': grup_ismi,
                     'Satır': n,
                     'Mağaza': n_mag,
                     f'{kap_stat_name}_Ort': round(kv.mean(), 2),
@@ -1213,12 +1316,13 @@ def main():
                 if 'Fiyat_Grubu' in results.columns:
                     show_cols.append('Fiyat_Grubu')
                 show_cols.append('Kombine_Grup')
+                show_cols.append('Grup_Ismi')
             else:
                 urun_metric_cols = cfg.get('urun_metric_cols', [])
                 if len(urun_metric_cols) == 3:
                     show_cols += urun_metric_cols
                     show_cols += ['_M1_Kume', '_M2_Kume', '_M3_Kume', 'Agirlikli_Skor']
-                show_cols += ['Urun_Grubu', 'Kombine_Grup']
+                show_cols += ['Urun_Grubu', 'Kombine_Grup', 'Grup_Ismi']
 
             show_cols = list(dict.fromkeys(show_cols))  # Remove duplicates
             show_cols = [c for c in show_cols if c in results.columns]  # Only existing columns
