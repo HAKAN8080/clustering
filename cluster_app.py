@@ -1,12 +1,11 @@
 """
-Cluster Analizi — Mağaza Kapasite + Ürün (Experiential Scoring)
-Format: TOP-1, TOP-2, TOP-3, MID-1, MID-2, MID-3, ALL-1, ALL-2, ALL-3
+Cluster Analizi — Mağaza Kapasite + Ürün (K-Means)
+Format: 1-1, 1-2, 1-3, 2-1, 2-2, 2-3, 3-1, 3-2, 3-3
 
 Metodoloji:
-1. Kapasite (K-Means): Mağazaları global olarak TOP/MID/ALL gruplarına ayır
-2. Ürün (Experiential Scoring): 3 metrik seç, her birini 3 kümeye böl (1,2,3)
-   Ürün Grubu = yuvarlama(M1_küme × w1 + M2_küme × w2 + M3_küme × w3) → 1, 2, 3
-3. Kombine: Kapasite + Ürün Grubu → TOP-1, MID-2, ALL-3, vb.
+1. Kapasite (K-Means): Mağazaları global olarak 1/2/3 gruplarına ayır
+2. Ürün (K-Means): Her kategori için mağazaları performansa göre 1/2/3 gruplarına ayır
+3. Kombine: Kapasite Grubu + Ürün Grubu → 1-1, 1-2, ... 3-3
 """
 
 import os
@@ -296,28 +295,49 @@ def kmeans_global(df, attribute_cols, n_clusters, desc=True):
     return np.array([mapping[c] for c in clusters])
 
 
-def kmeans_store_category(df, magaza_col, kategori_col, metric_cols, n_clusters=3, desc=True):
+def kmeans_store_category(df, magaza_col, kategori_col, metric_cols, n_clusters=3, desc=True, min_point=30):
     """
     Mağaza + Kategori bazında ürün gruplaması.
 
     1. Her mağaza+kategori kombinasyonu için metric'leri SUM ile aggregate et
-    2. Her kategori içinde mağazaları K-Means ile 3 gruba ayır
-    3. Sonucu ana veriye join et
+    2. Point sayısı kontrolü (min_point altındakiler hariç tutulur)
+    3. Her kategori içinde mağazaları K-Means ile 3 gruba ayır
+    4. Sonucu ana veriye join et
 
     desc=True → yüksek değer = 1 (TOP)
+    min_point → Mağaza-Kategori için minimum satır sayısı
     """
-    # ADIM 1: Mağaza + Kategori bazında aggregate
+    # ADIM 1: Mağaza + Kategori bazında aggregate + point sayısı
     agg_dict = {col: 'sum' for col in metric_cols}
-    store_cat_df = df.groupby([magaza_col, kategori_col], as_index=False).agg(agg_dict)
+    agg_dict['_point_count'] = (metric_cols[0], 'count')  # Satır sayısı
+
+    store_cat_df = df.groupby([magaza_col, kategori_col], as_index=False).agg(
+        **{col: (col, 'sum') for col in metric_cols},
+        _point_count=(metric_cols[0], 'count')
+    )
 
     # Toplam metrik değeri hesapla (tüm metric'lerin toplamı)
     store_cat_df['_total_metric'] = store_cat_df[metric_cols].sum(axis=1)
 
-    # ADIM 2: Her kategori için mağazaları grupla
+    # Point filtresi: min_point altındakileri işaretle (gruplama dışı)
+    store_cat_df['_low_point'] = store_cat_df['_point_count'] < min_point
+
+    # ADIM 2: Her kategori için mağazaları grupla (sadece yeterli point olanlar)
     store_cat_df['Urun_Grubu'] = 0
 
     for kategori in store_cat_df[kategori_col].unique():
-        mask = store_cat_df[kategori_col] == kategori
+        # Kategori maskesi + point filtresi (min_point üzeri olanlar)
+        cat_mask = store_cat_df[kategori_col] == kategori
+        point_mask = ~store_cat_df['_low_point']
+        mask = cat_mask & point_mask
+
+        # Low point olanları 0 olarak işaretle (gruplama dışı)
+        low_point_mask = cat_mask & store_cat_df['_low_point']
+        store_cat_df.loc[low_point_mask, 'Urun_Grubu'] = 0
+
+        if mask.sum() == 0:
+            continue
+
         subset = store_cat_df.loc[mask, '_total_metric'].copy()
 
         # inf değerleri NaN yap
@@ -431,7 +451,7 @@ def render_splash():
                 <div class="dot"></div>
             </div>
             <div class="splash-title">3D <span>Cluster</span> Analizi</div>
-            <div class="splash-sub">K-Means & Experiential Scoring</div>
+            <div class="splash-sub">K-Means Clustering</div>
         </div>
         """, unsafe_allow_html=True)
 
@@ -525,7 +545,7 @@ def main():
     st.markdown("""
     <div class="app-main-header">
         <h1>📊 3D <span>Cluster</span> Analizi</h1>
-        <div class="header-sub">Mağaza · Ürün · Fiyat &nbsp;|&nbsp; K-Means & Experiential Scoring</div>
+        <div class="header-sub">Mağaza · Kategori · Performans &nbsp;|&nbsp; K-Means Clustering</div>
         <div class="header-badge-row">
             <span class="hdr-badge g1">1-1</span>
             <span class="hdr-badge g2">2-2</span>
@@ -587,18 +607,6 @@ def main():
 
         st.markdown("<hr>", unsafe_allow_html=True)
 
-        # ─── CLUSTERING METODU ───────────────────────────────────────────────
-        st.markdown('<div class="section-header">🧮 Clustering Metodu</div>',
-                    unsafe_allow_html=True)
-        clustering_method = st.selectbox(
-            "Metod Seçin",
-            options=['K-Means Clustering', 'Experiential Scoring'],
-            key='clustering_method',
-            help="K-Means: Ürün ve Fiyat için ayrı K-Means kümeleme\nExperiential Scoring: 3 metriğin ağırlıklı ortalaması"
-        )
-
-        st.markdown("<hr>", unsafe_allow_html=True)
-
         # ─── ÜRÜN ────────────────────────────────────────────────────────────
         st.markdown('<div class="section-header">📊 Ürün — Per-Kategori Gruplama</div>',
                     unsafe_allow_html=True)
@@ -622,10 +630,6 @@ def main():
         urun_kategori_col = None
         urun_metric_col   = None
         urun_fiyat_col    = None
-        urun_metric_cols  = []
-        w_metric1 = 0.33
-        w_metric2 = 0.33
-        w_metric3 = 0.34
         urun_grup_sayisi  = 3
         fiyat_grup_sayisi = 3
 
@@ -658,69 +662,33 @@ def main():
             metric_options = [c for c in numeric_cols_u if c not in used]
 
             # ═══════════════════════════════════════════════════════════════
-            # K-MEANS SEÇİLDİYSE: Ürün Metrik + Fiyat (2 kolon)
+            # METRİK SEÇİMİ
             # ═══════════════════════════════════════════════════════════════
-            if clustering_method == 'K-Means Clustering':
-                if len(metric_options) >= 2:
-                    urun_metric_col = st.selectbox(
-                        "📈 Ürün Metrik (Y-eksen)", options=metric_options, key='u_metric'
+            if len(metric_options) >= 2:
+                urun_metric_col = st.selectbox(
+                    "📈 Ürün Metrik (Y-eksen)", options=metric_options, key='u_metric'
+                )
+                fiyat_options = [c for c in metric_options if c != urun_metric_col]
+                urun_fiyat_col = st.selectbox(
+                    "💰 İkinci Metrik (Z-eksen)", options=fiyat_options, key='u_fiyat'
+                )
+                col_grp, col_pnt = st.columns(2)
+                with col_grp:
+                    urun_grup_sayisi = st.number_input(
+                        "Ürün Grup Sayısı", min_value=2, max_value=10, value=3, key='u_grup'
                     )
-                    fiyat_options = [c for c in metric_options if c != urun_metric_col]
-                    urun_fiyat_col = st.selectbox(
-                        "💰 Fiyat Kolonu (Z-eksen)", options=fiyat_options, key='u_fiyat'
+                with col_pnt:
+                    min_point = st.number_input(
+                        "Min Point (Mağaza-Kat)", min_value=1, max_value=1000, value=30, key='min_point',
+                        help="Mağaza-Kategori kombinasyonunda en az kaç satır (point) olmalı"
                     )
-                    # Grup sayıları
-                    col_g1, col_g2 = st.columns(2)
-                    with col_g1:
-                        urun_grup_sayisi = st.number_input(
-                            "Ürün Grup (1/2/3)", min_value=2, max_value=10, value=3, key='u_grup'
-                        )
-                    with col_g2:
-                        fiyat_grup_sayisi = st.number_input(
-                            "Fiyat Grup (A/B/C)", min_value=2, max_value=10, value=3, key='f_grup'
-                        )
-                elif len(metric_options) == 1:
-                    urun_metric_col = metric_options[0]
-                    st.warning("⚠️ Fiyat kolonu için yeterli sayısal kolon yok.")
-                else:
-                    st.warning("⚠️ Sayısal kolon bulunamadı.")
-
-            # ═══════════════════════════════════════════════════════════════
-            # EXPERIENTIAL SCORING SEÇİLDİYSE: 3 Metrik + Ağırlıklar
-            # ═══════════════════════════════════════════════════════════════
+            elif len(metric_options) == 1:
+                urun_metric_col = metric_options[0]
+                min_point = 30
+                st.warning("⚠️ İkinci metrik kolonu için yeterli sayısal kolon yok.")
             else:
-                st.markdown("**📊 3 Metrik Kolon Seç**")
-                if len(metric_options) >= 3:
-                    col_m1, col_m2, col_m3 = st.columns(3)
-                    with col_m1:
-                        metric1 = st.selectbox("Metrik 1", options=metric_options, key='metric1')
-                    with col_m2:
-                        remaining1 = [c for c in metric_options if c != metric1]
-                        metric2 = st.selectbox("Metrik 2", options=remaining1, key='metric2')
-                    with col_m3:
-                        remaining2 = [c for c in remaining1 if c != metric2]
-                        metric3 = st.selectbox("Metrik 3", options=remaining2, key='metric3')
-                    urun_metric_cols = [metric1, metric2, metric3]
-
-                    # Ağırlıklar
-                    st.markdown("**⚖️ Metrik Ağırlıkları**")
-                    col_w1, col_w2, col_w3 = st.columns(3)
-                    with col_w1:
-                        w_metric1 = st.slider(f"{metric1[:10]}", 0.0, 1.0, 0.33, 0.01, key='w_m1')
-                    with col_w2:
-                        w_metric2 = st.slider(f"{metric2[:10]}", 0.0, 1.0, 0.33, 0.01, key='w_m2')
-                    with col_w3:
-                        w_metric3 = st.slider(f"{metric3[:10]}", 0.0, 1.0, 0.34, 0.01, key='w_m3')
-
-                    total_w = w_metric1 + w_metric2 + w_metric3
-                    if total_w > 0:
-                        st.caption(
-                            f"Normalize: {metric1[:8]} {w_metric1/total_w:.0%} · "
-                            f"{metric2[:8]} {w_metric2/total_w:.0%} · "
-                            f"{metric3[:8]} {w_metric3/total_w:.0%}"
-                        )
-                else:
-                    st.warning(f"⚠️ En az 3 sayısal kolon gerekli. Mevcut: {len(metric_options)}")
+                min_point = 30
+                st.warning("⚠️ Sayısal kolon bulunamadı.")
 
             n_kat = df_u[urun_kategori_col].nunique() if urun_kategori_col else 0
             n_mag = df_u[urun_magaza_col].nunique() if urun_magaza_col else 0
@@ -744,23 +712,13 @@ def main():
         st.markdown("<hr>", unsafe_allow_html=True)
 
         # ─── GRUPLA BUTONU ───────────────────────────────────────────────────
-        if clustering_method == 'K-Means Clustering':
-            btn_disabled = (
-                st.session_state.kapasite_df is None
-                or st.session_state.urun_df is None
-                or len(kap_attrs) == 0
-                or urun_metric_col is None
-                or urun_fiyat_col is None
-                or urun_kategori_col is None
-            )
-        else:
-            btn_disabled = (
-                st.session_state.kapasite_df is None
-                or st.session_state.urun_df is None
-                or len(kap_attrs) == 0
-                or len(urun_metric_cols) != 3
-                or urun_kategori_col is None
-            )
+        btn_disabled = (
+            st.session_state.kapasite_df is None
+            or st.session_state.urun_df is None
+            or len(kap_attrs) == 0
+            or urun_metric_col is None
+            or urun_kategori_col is None
+        )
 
         if st.button("🚀 Grupla ve Birleştir",
                       disabled=btn_disabled, use_container_width=True, type="primary"):
@@ -784,8 +742,34 @@ def main():
                 )
                 st.session_state.kapasite_results = kap_df
 
-                # ── STEP 2: Ürün df hazırla ──────────────────────────────────
+                # ── STEP 2: Ürün df hazırla + VERİ TEMİZLİĞİ ─────────────────
                 urun_df = st.session_state.urun_df.copy()
+
+                # 🧹 VERİ TEMİZLİĞİ: Metrik kolonlarında NaN → 0, Negatif → 0
+                metric_cols_to_clean = [urun_metric_col]
+                if urun_fiyat_col:
+                    metric_cols_to_clean.append(urun_fiyat_col)
+
+                for col in metric_cols_to_clean:
+                    if col in urun_df.columns:
+                        # NaN → 0
+                        urun_df[col] = urun_df[col].fillna(0)
+                        # Negatif → 0
+                        urun_df[col] = urun_df[col].clip(lower=0)
+
+                # 📊 POINT FİLTRESİ: Mağaza-Kategori kombinasyonu için min satır sayısı
+                point_counts = urun_df.groupby([urun_magaza_col, urun_kategori_col]).size().reset_index(name='_point_count')
+                urun_df = urun_df.merge(point_counts, on=[urun_magaza_col, urun_kategori_col], how='left')
+
+                # Point eşiğinin altındaki kombinasyonları işaretle
+                low_point_mask = urun_df['_point_count'] < min_point
+                low_point_count = urun_df[low_point_mask][urun_magaza_col + '_' + urun_kategori_col if False else urun_magaza_col].nunique() if low_point_mask.any() else 0
+
+                excluded_combinations = urun_df[low_point_mask][[urun_magaza_col, urun_kategori_col]].drop_duplicates()
+                n_excluded = len(excluded_combinations)
+
+                if n_excluded > 0:
+                    st.warning(f"⚠️ {n_excluded} mağaza-kategori kombinasyonu {min_point} point altında (gruplamaya dahil edilmeyecek)")
 
                 # ── STEP 3: Kapasite join ────────────────────────────────────
                 join_cols   = [kap_label, 'Kapasite_Grubu'] + kap_attrs
@@ -801,129 +785,44 @@ def main():
                 # ═══════════════════════════════════════════════════════════════
                 # K-MEANS CLUSTERING (Mağaza + Kategori Bazında)
                 # ═══════════════════════════════════════════════════════════════
-                if clustering_method == 'K-Means Clustering':
-                    # Mağaza + Kategori bazında ürün gruplaması
-                    metric_cols_for_grouping = [urun_metric_col]
-                    if urun_fiyat_col:
-                        metric_cols_for_grouping.append(urun_fiyat_col)
+                # Mağaza + Kategori bazında ürün gruplaması
+                metric_cols_for_grouping = [urun_metric_col]
+                if urun_fiyat_col:
+                    metric_cols_for_grouping.append(urun_fiyat_col)
 
-                    store_cat_groups = kmeans_store_category(
-                        urun_df, urun_magaza_col, urun_kategori_col,
-                        metric_cols_for_grouping, n_clusters=urun_grup_sayisi, desc=desc_order
-                    )
+                store_cat_groups = kmeans_store_category(
+                    urun_df, urun_magaza_col, urun_kategori_col,
+                    metric_cols_for_grouping, n_clusters=urun_grup_sayisi, desc=desc_order,
+                    min_point=min_point
+                )
 
-                    # Ana veriye join et
-                    urun_df = urun_df.merge(
-                        store_cat_groups[[urun_magaza_col, urun_kategori_col, 'Urun_Grubu']],
-                        on=[urun_magaza_col, urun_kategori_col],
-                        how='left'
-                    )
-                    urun_df['Urun_Grubu'] = urun_df['Urun_Grubu'].fillna(1).astype(int)
+                # Ana veriye join et
+                urun_df = urun_df.merge(
+                    store_cat_groups[[urun_magaza_col, urun_kategori_col, 'Urun_Grubu']],
+                    on=[urun_magaza_col, urun_kategori_col],
+                    how='left'
+                )
+                urun_df['Urun_Grubu'] = urun_df['Urun_Grubu'].fillna(1).astype(int)
 
-                    # Kombine Grup → 1-1, 1-2, ... 3-3 format
-                    urun_df['Kombine_Grup'] = (
-                        urun_df['Kapasite_Grubu'].astype(str) + '-' +
-                        urun_df['Urun_Grubu'].astype(str)
-                    )
+                # Kombine Grup → 1-1, 1-2, ... 3-3 format
+                urun_df['Kombine_Grup'] = (
+                    urun_df['Kapasite_Grubu'].astype(str) + '-' +
+                    urun_df['Urun_Grubu'].astype(str)
+                )
 
-                    # Session config
-                    st.session_state.final_results = urun_df
-                    st.session_state.config = {
-                        'clustering_method': clustering_method,
-                        'urun_magaza_col':   urun_magaza_col,
-                        'urun_kategori_col': urun_kategori_col,
-                        'urun_metric_col':   urun_metric_col,
-                        'urun_fiyat_col':    urun_fiyat_col,
-                        'kap_label':         kap_label,
-                        'kap_attrs':         kap_attrs,
-                        'kap_x_cols':        [f'_Kap_X_{c}' for c in kap_attrs],
-                        'kap_x_labels':      {f'_Kap_X_{c}': c for c in kap_attrs},
-                        'unmatched':         unmatched,
-                    }
-
-                # ═══════════════════════════════════════════════════════════════
-                # EXPERIENTIAL SCORING (Mağaza + Kategori Bazında)
-                # ═══════════════════════════════════════════════════════════════
-                else:
-                    # ADIM 1: Mağaza + Kategori bazında 3 metriği SUM ile aggregate et
-                    agg_dict = {col: 'sum' for col in urun_metric_cols}
-                    store_cat_df = urun_df.groupby(
-                        [urun_magaza_col, urun_kategori_col], as_index=False
-                    ).agg(agg_dict)
-
-                    # ADIM 2: Her kategori için scoring yap
-                    store_cat_df['_M1_Kume'] = 1
-                    store_cat_df['_M2_Kume'] = 1
-                    store_cat_df['_M3_Kume'] = 1
-
-                    for kategori in store_cat_df[urun_kategori_col].unique():
-                        mask = store_cat_df[urun_kategori_col] == kategori
-                        subset = store_cat_df.loc[mask]
-
-                        if len(subset) >= 2:
-                            m1_clusters = assign_experiential_cluster(
-                                subset[urun_metric_cols[0]].values, n_clusters=3, desc=desc_order
-                            )
-                            m2_clusters = assign_experiential_cluster(
-                                subset[urun_metric_cols[1]].values, n_clusters=3, desc=desc_order
-                            )
-                            m3_clusters = assign_experiential_cluster(
-                                subset[urun_metric_cols[2]].values, n_clusters=3, desc=desc_order
-                            )
-                            store_cat_df.loc[mask, '_M1_Kume'] = m1_clusters
-                            store_cat_df.loc[mask, '_M2_Kume'] = m2_clusters
-                            store_cat_df.loc[mask, '_M3_Kume'] = m3_clusters
-
-                    # Ağırlıkları normalize et
-                    total_w = w_metric1 + w_metric2 + w_metric3
-                    if total_w == 0:
-                        total_w = 1.0
-                    w1_n = w_metric1 / total_w
-                    w2_n = w_metric2 / total_w
-                    w3_n = w_metric3 / total_w
-
-                    # Ağırlıklı ortalama ve yuvarlama → Ürün Grubu (1, 2, 3)
-                    store_cat_df['Agirlikli_Skor'] = (
-                        store_cat_df['_M1_Kume'] * w1_n +
-                        store_cat_df['_M2_Kume'] * w2_n +
-                        store_cat_df['_M3_Kume'] * w3_n
-                    )
-                    store_cat_df['Urun_Grubu'] = np.clip(
-                        np.round(store_cat_df['Agirlikli_Skor']).astype(int), 1, 3
-                    )
-
-                    # ADIM 3: Ana veriye join et
-                    join_cols = [urun_magaza_col, urun_kategori_col,
-                                 '_M1_Kume', '_M2_Kume', '_M3_Kume',
-                                 'Agirlikli_Skor', 'Urun_Grubu']
-                    urun_df = urun_df.merge(
-                        store_cat_df[join_cols],
-                        on=[urun_magaza_col, urun_kategori_col],
-                        how='left'
-                    )
-
-                    # Kombine Grup → 1-1, 1-2, ... 3-3 format
-                    urun_df['Kombine_Grup'] = (
-                        urun_df['Kapasite_Grubu'].astype(str) + '-' +
-                        urun_df['Urun_Grubu'].astype(str)
-                    )
-
-                    # Session config
-                    st.session_state.final_results = urun_df
-                    st.session_state.config = {
-                        'clustering_method': clustering_method,
-                        'urun_magaza_col':   urun_magaza_col,
-                        'urun_kategori_col': urun_kategori_col,
-                        'urun_metric_cols':  urun_metric_cols,
-                        'kap_label':         kap_label,
-                        'kap_attrs':         kap_attrs,
-                        'kap_x_cols':        [f'_Kap_X_{c}' for c in kap_attrs],
-                        'kap_x_labels':      {f'_Kap_X_{c}': c for c in kap_attrs},
-                        'unmatched':         unmatched,
-                        'w_metric1':         w_metric1,
-                        'w_metric2':         w_metric2,
-                        'w_metric3':         w_metric3,
-                    }
+                # Session config
+                st.session_state.final_results = urun_df
+                st.session_state.config = {
+                    'urun_magaza_col':   urun_magaza_col,
+                    'urun_kategori_col': urun_kategori_col,
+                    'urun_metric_col':   urun_metric_col,
+                    'urun_fiyat_col':    urun_fiyat_col,
+                    'kap_label':         kap_label,
+                    'kap_attrs':         kap_attrs,
+                    'kap_x_cols':        [f'_Kap_X_{c}' for c in kap_attrs],
+                    'kap_x_labels':      {f'_Kap_X_{c}': c for c in kap_attrs},
+                    'unmatched':         unmatched,
+                }
 
                 if unmatched > 0:
                     st.warning(f"⚠️ {unmatched} satırda mağaza eşleştirme yapılamadı — '?' olarak bırakıldı.")
@@ -950,45 +849,17 @@ def main():
 
             urun_magaza_col   = cfg['urun_magaza_col']
             urun_kategori_col = cfg['urun_kategori_col']
-            urun_metric_cols  = cfg.get('urun_metric_cols', [])
             kap_x_cols        = cfg['kap_x_cols']
             kap_x_labels      = cfg['kap_x_labels']
 
             # ── Legenda ──────────────────────────────────────────────────────
-            method = cfg.get('clustering_method', 'K-Means Clustering')
-
-            if method == 'K-Means Clustering':
-                st.markdown("""
-                <div class="legend-box">
-                    <b>Metod: K-Means Clustering</b><br>
-                    <b>Format → 1-1, 1-2, ... 3-3</b><br>
-                    <hr style="margin:5px 0; border-color:#ddd;">
-                    <b>Kapasite Grubu:</b> 1 / 2 / 3 — Mağaza bazlı (global K-Means)<br>
-                    <b>Ürün Grubu:</b> 1 / 2 / 3 — Per-kategori K-Means
-                </div>
-                """, unsafe_allow_html=True)
-            else:
-                urun_metric_cols = cfg.get('urun_metric_cols', [])
-                w1 = cfg.get('w_metric1', 0.33)
-                w2 = cfg.get('w_metric2', 0.33)
-                w3 = cfg.get('w_metric3', 0.34)
-                total_w = w1 + w2 + w3
-                if total_w == 0:
-                    total_w = 1.0
-                metric_names = [c[:12] for c in urun_metric_cols] if len(urun_metric_cols) == 3 else ['M1', 'M2', 'M3']
-
-                st.markdown(f"""
-                <div class="legend-box">
-                    <b>Metod: Experiential Scoring</b><br>
-                    <b>Format → 1-1, 1-2, ... 3-3</b><br>
-                    <hr style="margin:5px 0; border-color:#ddd;">
-                    <b>Kapasite Grubu:</b> 1 / 2 / 3 — Mağaza bazlı (global K-Means)<br>
-                    <b>Ürün Grubu:</b> 1 / 2 / 3 — 3 metriğin ağırlıklı ortalaması<br>
-                    <hr style="margin:5px 0; border-color:#ddd;">
-                    <b>Hesaplama:</b> Her metrik 3 kümeye bölünür, sonra:<br>
-                    Ürün Grubu = yuvarlama({metric_names[0]} × {w1/total_w:.0%} + {metric_names[1]} × {w2/total_w:.0%} + {metric_names[2]} × {w3/total_w:.0%})
-                </div>
-                """, unsafe_allow_html=True)
+            st.markdown("""
+            <div class="legend-box">
+                <b>Format → 1-1, 1-2, ... 3-3</b><br>
+                <b>Kapasite Grubu:</b> 1 / 2 / 3 — Mağaza bazlı (global K-Means)<br>
+                <b>Ürün Grubu:</b> 1 / 2 / 3 — Mağaza+Kategori bazlı K-Means
+            </div>
+            """, unsafe_allow_html=True)
 
             # ── Elle Grup İsimlendirme ────────────────────────────────────────
             with st.expander("✏️ Grup İsimlerini Düzenle", expanded=False):
@@ -1059,81 +930,42 @@ def main():
             # 3D SCATTER
             # ══════════════════════════════════════════════════════════════════
             x_label = kap_x_labels.get(kapasite_x_col, kapasite_x_col)
+            urun_metric_col = cfg.get('urun_metric_col')
+            urun_fiyat_col = cfg.get('urun_fiyat_col')
 
-            if method == 'K-Means Clustering':
-                urun_metric_col = cfg.get('urun_metric_col')
-                urun_fiyat_col = cfg.get('urun_fiyat_col')
+            if urun_metric_col and urun_fiyat_col:
+                st.markdown(
+                    f"**3D Scatter** — X: {x_label} (Kapasite) &nbsp;|&nbsp; "
+                    f"Y: {urun_metric_col} &nbsp;|&nbsp; "
+                    f"Z: {urun_fiyat_col}"
+                )
 
-                if urun_metric_col and urun_fiyat_col:
-                    st.markdown(
-                        f"**3D Scatter** — X: {x_label} (Kapasite) &nbsp;|&nbsp; "
-                        f"Y: {urun_metric_col} &nbsp;|&nbsp; "
-                        f"Z: {urun_fiyat_col}"
-                    )
-
-                    fig = px.scatter_3d(
-                        filtered,
-                        x=kapasite_x_col,
-                        y=urun_metric_col,
-                        z=urun_fiyat_col,
-                        color='Kombine_Grup',
-                        hover_data=[urun_magaza_col, urun_kategori_col,
-                                    'Kapasite_Grubu', 'Urun_Grubu'],
-                        opacity=0.78,
-                        height=540,
-                        color_discrete_sequence=px.colors.qualitative.Set2
-                    )
-                    fig.update_traces(marker=dict(size=5))
-                    fig.update_layout(
-                        margin=dict(l=0, r=0, t=30, b=0),
-                        scene=dict(
-                            xaxis_title=x_label,
-                            yaxis_title=urun_metric_col,
-                            zaxis_title=urun_fiyat_col,
-                            xaxis=dict(backgroundcolor='#f0f4ff'),
-                            yaxis=dict(backgroundcolor='#fff4f0'),
-                            zaxis=dict(backgroundcolor='#f0fff4'),
-                        ),
-                        legend=dict(orientation="v", x=1.02, y=0.5, font=dict(size=11))
-                    )
-                    st.plotly_chart(fig, use_container_width=True)
-
-            else:  # Experiential Scoring
-                urun_metric_cols = cfg.get('urun_metric_cols', [])
-                if len(urun_metric_cols) == 3:
-                    st.markdown(
-                        f"**3D Scatter** — X: {x_label} (Kapasite) &nbsp;|&nbsp; "
-                        f"Y: {urun_metric_cols[0]} &nbsp;|&nbsp; "
-                        f"Z: {urun_metric_cols[1]}"
-                    )
-
-                    fig = px.scatter_3d(
-                        filtered,
-                        x=kapasite_x_col,
-                        y=urun_metric_cols[0],
-                        z=urun_metric_cols[1],
-                        color='Kombine_Grup',
-                        hover_data=[urun_magaza_col, urun_kategori_col,
-                                    'Kapasite_Grubu', 'Urun_Grubu',
-                                    '_M1_Kume', '_M2_Kume', '_M3_Kume', 'Agirlikli_Skor'],
-                        opacity=0.78,
-                        height=540,
-                        color_discrete_sequence=px.colors.qualitative.Set2
-                    )
-                    fig.update_traces(marker=dict(size=5))
-                    fig.update_layout(
-                        margin=dict(l=0, r=0, t=30, b=0),
-                        scene=dict(
-                            xaxis_title=x_label,
-                            yaxis_title=urun_metric_cols[0],
-                            zaxis_title=urun_metric_cols[1],
-                            xaxis=dict(backgroundcolor='#f0f4ff'),
-                            yaxis=dict(backgroundcolor='#fff4f0'),
-                            zaxis=dict(backgroundcolor='#f0fff4'),
-                        ),
-                        legend=dict(orientation="v", x=1.02, y=0.5, font=dict(size=11))
-                    )
-                    st.plotly_chart(fig, use_container_width=True)
+                fig = px.scatter_3d(
+                    filtered,
+                    x=kapasite_x_col,
+                    y=urun_metric_col,
+                    z=urun_fiyat_col,
+                    color='Kombine_Grup',
+                    hover_data=[urun_magaza_col, urun_kategori_col,
+                                'Kapasite_Grubu', 'Urun_Grubu'],
+                    opacity=0.78,
+                    height=540,
+                    color_discrete_sequence=px.colors.qualitative.Set2
+                )
+                fig.update_traces(marker=dict(size=5))
+                fig.update_layout(
+                    margin=dict(l=0, r=0, t=30, b=0),
+                    scene=dict(
+                        xaxis_title=x_label,
+                        yaxis_title=urun_metric_col,
+                        zaxis_title=urun_fiyat_col,
+                        xaxis=dict(backgroundcolor='#f0f4ff'),
+                        yaxis=dict(backgroundcolor='#fff4f0'),
+                        zaxis=dict(backgroundcolor='#f0fff4'),
+                    ),
+                    legend=dict(orientation="v", x=1.02, y=0.5, font=dict(size=11))
+                )
+                st.plotly_chart(fig, use_container_width=True)
 
             st.markdown("<hr>", unsafe_allow_html=True)
 
@@ -1180,20 +1012,12 @@ def main():
                     f'{kap_stat_name}_Ort': round(kv.mean(), 2),
                 }
 
-                if method == 'K-Means Clustering':
-                    urun_metric_col = cfg.get('urun_metric_col')
-                    urun_fiyat_col = cfg.get('urun_fiyat_col')
-                    if urun_metric_col:
-                        row[f'{urun_metric_col[:10]}_Ort'] = round(grp_data[urun_metric_col].mean(), 2)
-                    if urun_fiyat_col:
-                        row[f'{urun_fiyat_col[:10]}_Ort'] = round(grp_data[urun_fiyat_col].mean(), 2)
-                else:
-                    urun_metric_cols = cfg.get('urun_metric_cols', [])
-                    if 'Agirlikli_Skor' in grp_data.columns:
-                        row['Skor_Ort'] = round(grp_data['Agirlikli_Skor'].mean(), 3)
-                    if len(urun_metric_cols) == 3:
-                        for i, mcol in enumerate(urun_metric_cols):
-                            row[f'{mcol[:8]}_Ort'] = round(grp_data[mcol].mean(), 2)
+                urun_metric_col = cfg.get('urun_metric_col')
+                urun_fiyat_col = cfg.get('urun_fiyat_col')
+                if urun_metric_col and urun_metric_col in grp_data.columns:
+                    row[f'{urun_metric_col[:10]}_Ort'] = round(grp_data[urun_metric_col].mean(), 2)
+                if urun_fiyat_col and urun_fiyat_col in grp_data.columns:
+                    row[f'{urun_fiyat_col[:10]}_Ort'] = round(grp_data[urun_fiyat_col].mean(), 2)
 
                 summary_rows.append(row)
 
@@ -1201,23 +1025,6 @@ def main():
                 summary_df = pd.DataFrame(summary_rows)
                 st.dataframe(summary_df, hide_index=True, use_container_width=True,
                              height=380)
-
-                # Dağılım grafiği (sadece Experiential Scoring için)
-                if method != 'K-Means Clustering' and 'Agirlikli_Skor' in filtered.columns:
-                    st.markdown("**📈 Kombine Grup — Ağırlıklı Skor Dağılımı**")
-                    fig_unified = px.box(
-                        filtered, x='Kombine_Grup', y='Agirlikli_Skor',
-                        color='Kombine_Grup', height=320,
-                        category_orders={'Kombine_Grup': all_groups},
-                        color_discrete_sequence=px.colors.qualitative.Set2
-                    )
-                    fig_unified.update_layout(
-                        showlegend=False,
-                        margin=dict(l=0, r=0, t=10, b=0),
-                        xaxis_title='Kombine Grup',
-                        yaxis_title='Ağırlıklı Skor'
-                    )
-                    st.plotly_chart(fig_unified, use_container_width=True)
 
             st.markdown("<hr>", unsafe_allow_html=True)
 
@@ -1227,87 +1034,34 @@ def main():
             if seçilen_kategori != '🔄 Tümü':
                 st.markdown(f"**📈 Dağılımlar — {seçilen_kategori}**")
 
-                if method == 'K-Means Clustering':
-                    urun_metric_col = cfg.get('urun_metric_col')
-                    urun_fiyat_col = cfg.get('urun_fiyat_col')
+                urun_metric_col = cfg.get('urun_metric_col')
+                urun_fiyat_col = cfg.get('urun_fiyat_col')
 
-                    col_y, col_z = st.columns(2)
-                    with col_y:
-                        if urun_metric_col:
-                            st.caption(f"Ürün Metrik: {urun_metric_col}")
-                            fig_y = px.box(
-                                filtered, x='Urun_Grubu', y=urun_metric_col,
-                                color='Urun_Grubu', height=270,
-                                color_discrete_sequence=['#C6EFCE', '#FFEB9C', '#FFC7CE']
-                            )
-                            fig_y.update_layout(showlegend=False,
-                                                margin=dict(l=0, r=0, t=10, b=0),
-                                                xaxis_title='Ürün Grubu')
-                            st.plotly_chart(fig_y, use_container_width=True)
-                    with col_z:
-                        if urun_fiyat_col and 'Fiyat_Grubu' in filtered.columns:
-                            st.caption(f"Fiyat: {urun_fiyat_col}")
-                            fig_z = px.box(
-                                filtered, x='Fiyat_Grubu', y=urun_fiyat_col,
-                                color='Fiyat_Grubu', height=270,
-                                color_discrete_sequence=['#BDD7EE', '#E2EFDA', '#FCE4D6']
-                            )
-                            fig_z.update_layout(showlegend=False,
-                                                margin=dict(l=0, r=0, t=10, b=0),
-                                                xaxis_title='Fiyat Grubu')
-                            st.plotly_chart(fig_z, use_container_width=True)
-
-                else:  # Experiential Scoring
-                    urun_metric_cols = cfg.get('urun_metric_cols', [])
-                    if len(urun_metric_cols) == 3:
-                        col1, col2, col3 = st.columns(3)
-
-                        with col1:
-                            st.caption(f"{urun_metric_cols[0]}")
-                            fig1 = px.box(
-                                filtered, x='_M1_Kume', y=urun_metric_cols[0],
-                                color='_M1_Kume', height=250,
-                                color_discrete_sequence=['#C6EFCE', '#FFEB9C', '#FFC7CE']
-                            )
-                            fig1.update_layout(showlegend=False,
-                                               margin=dict(l=0, r=0, t=10, b=0),
-                                               xaxis_title='Küme')
-                            st.plotly_chart(fig1, use_container_width=True)
-
-                        with col2:
-                            st.caption(f"{urun_metric_cols[1]}")
-                            fig2 = px.box(
-                                filtered, x='_M2_Kume', y=urun_metric_cols[1],
-                                color='_M2_Kume', height=250,
-                                color_discrete_sequence=['#C6EFCE', '#FFEB9C', '#FFC7CE']
-                            )
-                            fig2.update_layout(showlegend=False,
-                                               margin=dict(l=0, r=0, t=10, b=0),
-                                               xaxis_title='Küme')
-                            st.plotly_chart(fig2, use_container_width=True)
-
-                        with col3:
-                            st.caption(f"{urun_metric_cols[2]}")
-                            fig3 = px.box(
-                                filtered, x='_M3_Kume', y=urun_metric_cols[2],
-                                color='_M3_Kume', height=250,
-                                color_discrete_sequence=['#C6EFCE', '#FFEB9C', '#FFC7CE']
-                            )
-                            fig3.update_layout(showlegend=False,
-                                               margin=dict(l=0, r=0, t=10, b=0),
-                                               xaxis_title='Küme')
-                            st.plotly_chart(fig3, use_container_width=True)
-
-                        # Ürün grubu dağılımı
-                        st.markdown("**📊 Ürün Grubu Dağılımı**")
-                        fig_ug = px.histogram(
-                            filtered, x='Urun_Grubu', color='Urun_Grubu', height=250,
+                col_y, col_z = st.columns(2)
+                with col_y:
+                    if urun_metric_col and urun_metric_col in filtered.columns:
+                        st.caption(f"Ürün Metrik: {urun_metric_col}")
+                        fig_y = px.box(
+                            filtered, x='Urun_Grubu', y=urun_metric_col,
+                            color='Urun_Grubu', height=270,
                             color_discrete_sequence=['#C6EFCE', '#FFEB9C', '#FFC7CE']
                         )
-                        fig_ug.update_layout(showlegend=False,
-                                             margin=dict(l=0, r=0, t=10, b=0),
-                                             xaxis_title='Ürün Grubu', yaxis_title='Adet')
-                        st.plotly_chart(fig_ug, use_container_width=True)
+                        fig_y.update_layout(showlegend=False,
+                                            margin=dict(l=0, r=0, t=10, b=0),
+                                            xaxis_title='Ürün Grubu')
+                        st.plotly_chart(fig_y, use_container_width=True)
+                with col_z:
+                    if urun_fiyat_col and urun_fiyat_col in filtered.columns:
+                        st.caption(f"İkinci Metrik: {urun_fiyat_col}")
+                        fig_z = px.box(
+                            filtered, x='Urun_Grubu', y=urun_fiyat_col,
+                            color='Urun_Grubu', height=270,
+                            color_discrete_sequence=['#BDD7EE', '#E2EFDA', '#FCE4D6']
+                        )
+                        fig_z.update_layout(showlegend=False,
+                                            margin=dict(l=0, r=0, t=10, b=0),
+                                            xaxis_title='Ürün Grubu')
+                        st.plotly_chart(fig_z, use_container_width=True)
 
             else:
                 # Tümü seçilince: Kategori özet tablo
@@ -1329,25 +1083,18 @@ def main():
             # ══════════════════════════════════════════════════════════════════
             st.markdown("**📥 İndir**")
 
-            # Çıktı sütunları metoda göre
+            # Çıktı sütunları
             show_cols = [urun_magaza_col, urun_kategori_col, 'Kapasite_Grubu']
 
-            if method == 'K-Means Clustering':
-                urun_metric_col = cfg.get('urun_metric_col')
-                urun_fiyat_col = cfg.get('urun_fiyat_col')
-                if urun_metric_col:
-                    show_cols.append(urun_metric_col)
-                if urun_fiyat_col:
-                    show_cols.append(urun_fiyat_col)
-                show_cols.append('Urun_Grubu')
-                show_cols.append('Kombine_Grup')
-                show_cols.append('Grup_Ismi')
-            else:
-                urun_metric_cols = cfg.get('urun_metric_cols', [])
-                if len(urun_metric_cols) == 3:
-                    show_cols += urun_metric_cols
-                    show_cols += ['_M1_Kume', '_M2_Kume', '_M3_Kume', 'Agirlikli_Skor']
-                show_cols += ['Urun_Grubu', 'Kombine_Grup', 'Grup_Ismi']
+            urun_metric_col = cfg.get('urun_metric_col')
+            urun_fiyat_col = cfg.get('urun_fiyat_col')
+            if urun_metric_col:
+                show_cols.append(urun_metric_col)
+            if urun_fiyat_col:
+                show_cols.append(urun_fiyat_col)
+            show_cols.append('Urun_Grubu')
+            show_cols.append('Kombine_Grup')
+            show_cols.append('Grup_Ismi')
 
             show_cols = list(dict.fromkeys(show_cols))  # Remove duplicates
             show_cols = [c for c in show_cols if c in results.columns]  # Only existing columns
