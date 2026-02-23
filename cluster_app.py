@@ -592,10 +592,14 @@ def main():
             kap_label = st.selectbox("🏷️ Mağaza Kolonu", options=all_cols_k, key='kap_label')
 
             available_k = [c for c in numeric_cols_k if c != kap_label]
+            # "capacity" içeren kolonları otomatik seç
+            capacity_cols = [c for c in available_k if 'capacity' in c.lower()]
+            default_cols = capacity_cols if capacity_cols else available_k[:min(2, len(available_k))]
+
             kap_attrs   = st.multiselect(
                 "📊 Kapasite Attributeları (X-eksen)",
                 options=available_k,
-                default=available_k[:min(2, len(available_k))],
+                default=default_cols,
                 key='kap_attrs'
             )
             kap_grup_sayisi = st.number_input(
@@ -679,15 +683,15 @@ def main():
                     )
                 with col_pnt:
                     min_point = st.number_input(
-                        "Min Point (Mağaza-Kat)", min_value=1, max_value=1000, value=30, key='min_point',
+                        "Min Point (Mağaza-Kat)", min_value=1, max_value=1000, value=1, key='min_point',
                         help="Mağaza-Kategori kombinasyonunda en az kaç satır (point) olmalı"
                     )
             elif len(metric_options) == 1:
                 urun_metric_col = metric_options[0]
-                min_point = 30
+                min_point = 1
                 st.warning("⚠️ İkinci metrik kolonu için yeterli sayısal kolon yok.")
             else:
-                min_point = 30
+                min_point = 1
                 st.warning("⚠️ Sayısal kolon bulunamadı.")
 
             n_kat = df_u[urun_kategori_col].nunique() if urun_kategori_col else 0
