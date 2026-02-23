@@ -296,17 +296,29 @@ def kmeans_global(df, attribute_cols, n_clusters, desc=True):
     return np.array([mapping[c] for c in clusters])
 
 
-def kmeans_per_category(df, kategori_col, metric_col, n_clusters,
-                        label_type='numeric', desc=True):
+def kmeans_store_category(df, magaza_col, kategori_col, metric_cols, n_clusters=3, desc=True):
     """
-    Kategori bazında ayrı K-Means.
-    desc=True → 1/A = en büyük, desc=False → 1/A = en küçük
-    """
-    result = pd.Series(index=df.index, dtype=object)
+    Mağaza + Kategori bazında ürün gruplaması.
 
-    for kategori in df[kategori_col].unique():
-        mask = df[kategori_col] == kategori
-        subset = df.loc[mask, metric_col].copy()
+    1. Her mağaza+kategori kombinasyonu için metric'leri SUM ile aggregate et
+    2. Her kategori içinde mağazaları K-Means ile 3 gruba ayır
+    3. Sonucu ana veriye join et
+
+    desc=True → yüksek değer = 1 (TOP)
+    """
+    # ADIM 1: Mağaza + Kategori bazında aggregate
+    agg_dict = {col: 'sum' for col in metric_cols}
+    store_cat_df = df.groupby([magaza_col, kategori_col], as_index=False).agg(agg_dict)
+
+    # Toplam metrik değeri hesapla (tüm metric'lerin toplamı)
+    store_cat_df['_total_metric'] = store_cat_df[metric_cols].sum(axis=1)
+
+    # ADIM 2: Her kategori için mağazaları grupla
+    store_cat_df['Urun_Grubu'] = 0
+
+    for kategori in store_cat_df[kategori_col].unique():
+        mask = store_cat_df[kategori_col] == kategori
+        subset = store_cat_df.loc[mask, '_total_metric'].copy()
 
         # inf değerleri NaN yap
         subset = subset.replace([np.inf, -np.inf], np.nan)
@@ -314,12 +326,12 @@ def kmeans_per_category(df, kategori_col, metric_col, n_clusters,
         # Yeterli veri kontrolü
         non_null = subset.dropna()
         if len(non_null) < 2:
-            result.loc[mask] = 1 if label_type == 'numeric' else 'A'
+            store_cat_df.loc[mask, 'Urun_Grubu'] = 1
             continue
 
         actual_clusters = min(n_clusters, len(non_null.unique()))
         if actual_clusters < 2:
-            result.loc[mask] = 1 if label_type == 'numeric' else 'A'
+            store_cat_df.loc[mask, 'Urun_Grubu'] = 1
             continue
 
         # NaN'ları ortalama ile doldur
@@ -333,27 +345,21 @@ def kmeans_per_category(df, kategori_col, metric_col, n_clusters,
 
         scaler = StandardScaler()
         X_scaled = scaler.fit_transform(X)
-
-        # StandardScaler sonrası NaN kontrolü
         X_scaled = np.nan_to_num(X_scaled, nan=0.0, posinf=0.0, neginf=0.0)
 
         kmeans = KMeans(n_clusters=actual_clusters, random_state=42, n_init=10)
         clusters = kmeans.fit_predict(X_scaled)
 
-        # Düşük → yüksek sıralama (clusters zaten subset boyutunda)
+        # Sıralama: desc=True → yüksek değer = 1
         cluster_values = subset.fillna(fill_value).values
         means = {c: cluster_values[clusters == c].mean() for c in range(actual_clusters)}
         sorted_c = sorted(means.keys(), key=lambda x: means[x], reverse=desc)
-        mapping = {old: new for new, old in enumerate(sorted_c)}
-        sorted_clusters = np.array([mapping[c] for c in clusters])
+        mapping = {old: new + 1 for new, old in enumerate(sorted_c)}
 
-        if label_type == 'numeric':
-            result.loc[mask] = sorted_clusters + 1          # 1, 2, 3…
-        else:
-            labels = [chr(65 + i) for i in range(actual_clusters)]  # A, B, C…
-            result.loc[mask] = [labels[c] for c in sorted_clusters]
+        store_cat_df.loc[mask, 'Urun_Grubu'] = [mapping[c] for c in clusters]
 
-    return result
+    # ADIM 3: Sonucu döndür (join için kullanılacak)
+    return store_cat_df[[magaza_col, kategori_col, 'Urun_Grubu', '_total_metric']]
 
 
 def get_kapasite_label(grup_num, total):
@@ -613,7 +619,6 @@ def main():
 
         # Defaults
         urun_magaza_col   = None
-        urun_urun_col     = None
         urun_kategori_col = None
         urun_metric_col   = None
         urun_fiyat_col    = None
@@ -630,13 +635,8 @@ def main():
             numeric_cols_u = df_u.select_dtypes(include=[np.number]).columns.tolist()
             cat_cols_u     = df_u.select_dtypes(include=['object', 'category']).columns.tolist()
 
-            # Mağaza + Ürün kolonu
+            # Mağaza kolonu
             urun_magaza_col = st.selectbox("🏪 Mağaza Kolonu", options=all_cols_u, key='u_magaza')
-            urun_urun_col   = st.selectbox(
-                "📦 Ürün Kolonu",
-                options=[c for c in all_cols_u if c != urun_magaza_col],
-                key='u_urun'
-            )
 
             # Kategori kolonu
             cat_options = [c for c in cat_cols_u if c != urun_magaza_col]
@@ -652,7 +652,7 @@ def main():
                 st.warning("⚠️ Kategori (string) kolonu bulunamadı.")
 
             # Kullanılan kolonlar
-            used = [urun_magaza_col, urun_urun_col]
+            used = [urun_magaza_col]
             if urun_kategori_col:
                 used.append(urun_kategori_col)
             metric_options = [c for c in numeric_cols_u if c not in used]
@@ -723,7 +723,8 @@ def main():
                     st.warning(f"⚠️ En az 3 sayısal kolon gerekli. Mevcut: {len(metric_options)}")
 
             n_kat = df_u[urun_kategori_col].nunique() if urun_kategori_col else 0
-            st.caption(f"✓ {len(df_u)} satır | {n_kat} kategori")
+            n_mag = df_u[urun_magaza_col].nunique() if urun_magaza_col else 0
+            st.caption(f"✓ {len(df_u)} satır | {n_mag} mağaza | {n_kat} kategori")
         else:
             st.caption("📁 ürün_data.xlsx yükleyin")
 
@@ -798,18 +799,26 @@ def main():
                 unmatched = urun_df['Kapasite_Grubu'].eq('?').sum()
 
                 # ═══════════════════════════════════════════════════════════════
-                # K-MEANS CLUSTERING
+                # K-MEANS CLUSTERING (Mağaza + Kategori Bazında)
                 # ═══════════════════════════════════════════════════════════════
                 if clustering_method == 'K-Means Clustering':
-                    # Per-category K-Means for Ürün ve Fiyat
-                    urun_df['Urun_Grubu'] = kmeans_per_category(
-                        urun_df, urun_kategori_col, urun_metric_col,
-                        urun_grup_sayisi, 'numeric', desc=desc_order
+                    # Mağaza + Kategori bazında ürün gruplaması
+                    metric_cols_for_grouping = [urun_metric_col]
+                    if urun_fiyat_col:
+                        metric_cols_for_grouping.append(urun_fiyat_col)
+
+                    store_cat_groups = kmeans_store_category(
+                        urun_df, urun_magaza_col, urun_kategori_col,
+                        metric_cols_for_grouping, n_clusters=urun_grup_sayisi, desc=desc_order
                     )
-                    urun_df['Fiyat_Grubu'] = kmeans_per_category(
-                        urun_df, urun_kategori_col, urun_fiyat_col,
-                        fiyat_grup_sayisi, 'alpha', desc=desc_order
+
+                    # Ana veriye join et
+                    urun_df = urun_df.merge(
+                        store_cat_groups[[urun_magaza_col, urun_kategori_col, 'Urun_Grubu']],
+                        on=[urun_magaza_col, urun_kategori_col],
+                        how='left'
                     )
+                    urun_df['Urun_Grubu'] = urun_df['Urun_Grubu'].fillna(1).astype(int)
 
                     # Kombine Grup → 1-1, 1-2, ... 3-3 format
                     urun_df['Kombine_Grup'] = (
@@ -822,7 +831,6 @@ def main():
                     st.session_state.config = {
                         'clustering_method': clustering_method,
                         'urun_magaza_col':   urun_magaza_col,
-                        'urun_urun_col':     urun_urun_col,
                         'urun_kategori_col': urun_kategori_col,
                         'urun_metric_col':   urun_metric_col,
                         'urun_fiyat_col':    urun_fiyat_col,
@@ -834,24 +842,37 @@ def main():
                     }
 
                 # ═══════════════════════════════════════════════════════════════
-                # EXPERIENTIAL SCORING
+                # EXPERIENTIAL SCORING (Mağaza + Kategori Bazında)
                 # ═══════════════════════════════════════════════════════════════
                 else:
-                    # Her metriği ayrı ayrı 3 kümeye böl
-                    metric1_clusters = assign_experiential_cluster(
-                        urun_df[urun_metric_cols[0]].values, n_clusters=3, desc=desc_order
-                    )
-                    metric2_clusters = assign_experiential_cluster(
-                        urun_df[urun_metric_cols[1]].values, n_clusters=3, desc=desc_order
-                    )
-                    metric3_clusters = assign_experiential_cluster(
-                        urun_df[urun_metric_cols[2]].values, n_clusters=3, desc=desc_order
-                    )
+                    # ADIM 1: Mağaza + Kategori bazında 3 metriği SUM ile aggregate et
+                    agg_dict = {col: 'sum' for col in urun_metric_cols}
+                    store_cat_df = urun_df.groupby(
+                        [urun_magaza_col, urun_kategori_col], as_index=False
+                    ).agg(agg_dict)
 
-                    # Ara küme değerlerini kaydet
-                    urun_df['_M1_Kume'] = metric1_clusters
-                    urun_df['_M2_Kume'] = metric2_clusters
-                    urun_df['_M3_Kume'] = metric3_clusters
+                    # ADIM 2: Her kategori için scoring yap
+                    store_cat_df['_M1_Kume'] = 1
+                    store_cat_df['_M2_Kume'] = 1
+                    store_cat_df['_M3_Kume'] = 1
+
+                    for kategori in store_cat_df[urun_kategori_col].unique():
+                        mask = store_cat_df[urun_kategori_col] == kategori
+                        subset = store_cat_df.loc[mask]
+
+                        if len(subset) >= 2:
+                            m1_clusters = assign_experiential_cluster(
+                                subset[urun_metric_cols[0]].values, n_clusters=3, desc=desc_order
+                            )
+                            m2_clusters = assign_experiential_cluster(
+                                subset[urun_metric_cols[1]].values, n_clusters=3, desc=desc_order
+                            )
+                            m3_clusters = assign_experiential_cluster(
+                                subset[urun_metric_cols[2]].values, n_clusters=3, desc=desc_order
+                            )
+                            store_cat_df.loc[mask, '_M1_Kume'] = m1_clusters
+                            store_cat_df.loc[mask, '_M2_Kume'] = m2_clusters
+                            store_cat_df.loc[mask, '_M3_Kume'] = m3_clusters
 
                     # Ağırlıkları normalize et
                     total_w = w_metric1 + w_metric2 + w_metric3
@@ -862,15 +883,24 @@ def main():
                     w3_n = w_metric3 / total_w
 
                     # Ağırlıklı ortalama ve yuvarlama → Ürün Grubu (1, 2, 3)
-                    weighted_avg = (metric1_clusters * w1_n +
-                                    metric2_clusters * w2_n +
-                                    metric3_clusters * w3_n)
+                    store_cat_df['Agirlikli_Skor'] = (
+                        store_cat_df['_M1_Kume'] * w1_n +
+                        store_cat_df['_M2_Kume'] * w2_n +
+                        store_cat_df['_M3_Kume'] * w3_n
+                    )
+                    store_cat_df['Urun_Grubu'] = np.clip(
+                        np.round(store_cat_df['Agirlikli_Skor']).astype(int), 1, 3
+                    )
 
-                    urun_grubu = np.round(weighted_avg).astype(int)
-                    urun_grubu = np.clip(urun_grubu, 1, 3)
-
-                    urun_df['Agirlikli_Skor'] = weighted_avg
-                    urun_df['Urun_Grubu'] = urun_grubu
+                    # ADIM 3: Ana veriye join et
+                    join_cols = [urun_magaza_col, urun_kategori_col,
+                                 '_M1_Kume', '_M2_Kume', '_M3_Kume',
+                                 'Agirlikli_Skor', 'Urun_Grubu']
+                    urun_df = urun_df.merge(
+                        store_cat_df[join_cols],
+                        on=[urun_magaza_col, urun_kategori_col],
+                        how='left'
+                    )
 
                     # Kombine Grup → 1-1, 1-2, ... 3-3 format
                     urun_df['Kombine_Grup'] = (
@@ -883,7 +913,6 @@ def main():
                     st.session_state.config = {
                         'clustering_method': clustering_method,
                         'urun_magaza_col':   urun_magaza_col,
-                        'urun_urun_col':     urun_urun_col,
                         'urun_kategori_col': urun_kategori_col,
                         'urun_metric_cols':  urun_metric_cols,
                         'kap_label':         kap_label,
@@ -920,7 +949,6 @@ def main():
             cfg     = st.session_state.config
 
             urun_magaza_col   = cfg['urun_magaza_col']
-            urun_urun_col     = cfg['urun_urun_col']
             urun_kategori_col = cfg['urun_kategori_col']
             urun_metric_cols  = cfg.get('urun_metric_cols', [])
             kap_x_cols        = cfg['kap_x_cols']
@@ -1022,7 +1050,7 @@ def main():
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("Toplam Satır",  f"{len(filtered):,}")
             c2.metric("Mağaza",        f"{filtered[urun_magaza_col].nunique():,}")
-            c3.metric("Ürün",          f"{filtered[urun_urun_col].nunique():,}")
+            c3.metric("Kategori",      f"{filtered[urun_kategori_col].nunique():,}")
             c4.metric("Kombine Grup",  f"{filtered['Kombine_Grup'].nunique()}")
 
             st.markdown("<hr>", unsafe_allow_html=True)
@@ -1049,8 +1077,8 @@ def main():
                         y=urun_metric_col,
                         z=urun_fiyat_col,
                         color='Kombine_Grup',
-                        hover_data=[urun_magaza_col, urun_urun_col, urun_kategori_col,
-                                    'Kapasite_Grubu', 'Urun_Grubu', 'Fiyat_Grubu'],
+                        hover_data=[urun_magaza_col, urun_kategori_col,
+                                    'Kapasite_Grubu', 'Urun_Grubu'],
                         opacity=0.78,
                         height=540,
                         color_discrete_sequence=px.colors.qualitative.Set2
@@ -1085,7 +1113,7 @@ def main():
                         y=urun_metric_cols[0],
                         z=urun_metric_cols[1],
                         color='Kombine_Grup',
-                        hover_data=[urun_magaza_col, urun_urun_col, urun_kategori_col,
+                        hover_data=[urun_magaza_col, urun_kategori_col,
                                     'Kapasite_Grubu', 'Urun_Grubu',
                                     '_M1_Kume', '_M2_Kume', '_M3_Kume', 'Agirlikli_Skor'],
                         opacity=0.78,
@@ -1287,9 +1315,8 @@ def main():
                 kat_summary = (filtered
                                .groupby(urun_kategori_col)
                                .agg(
-                                   Satır=(urun_urun_col, 'count'),
+                                   Satır=(urun_magaza_col, 'count'),
                                    Mağaza=(urun_magaza_col, 'nunique'),
-                                   Ürün=(urun_urun_col, 'nunique'),
                                    Kombine_Grup=('Kombine_Grup', 'nunique')
                                )
                                .reset_index())
@@ -1303,18 +1330,16 @@ def main():
             st.markdown("**📥 İndir**")
 
             # Çıktı sütunları metoda göre
-            show_cols = [urun_magaza_col, urun_urun_col, urun_kategori_col, 'Kapasite_Grubu']
+            show_cols = [urun_magaza_col, urun_kategori_col, 'Kapasite_Grubu']
 
             if method == 'K-Means Clustering':
                 urun_metric_col = cfg.get('urun_metric_col')
                 urun_fiyat_col = cfg.get('urun_fiyat_col')
                 if urun_metric_col:
                     show_cols.append(urun_metric_col)
-                show_cols.append('Urun_Grubu')
                 if urun_fiyat_col:
                     show_cols.append(urun_fiyat_col)
-                if 'Fiyat_Grubu' in results.columns:
-                    show_cols.append('Fiyat_Grubu')
+                show_cols.append('Urun_Grubu')
                 show_cols.append('Kombine_Grup')
                 show_cols.append('Grup_Ismi')
             else:
