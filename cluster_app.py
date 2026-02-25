@@ -297,89 +297,118 @@ def kmeans_global(df, attribute_cols, n_clusters, desc=True):
 
 def kmeans_store_category(df, magaza_col, kategori_col, metric_cols, n_clusters=3, desc=True, min_point=30):
     """
-    Mağaza + Kategori bazında ürün gruplaması.
-
-    1. Her mağaza+kategori kombinasyonu için metric'leri SUM ile aggregate et
-    2. Point sayısı kontrolü (min_point altındakiler hariç tutulur)
-    3. Her kategori içinde mağazaları K-Means ile 3 gruba ayır
-    4. Sonucu ana veriye join et
-
-    desc=True → yüksek değer = 1 (TOP)
-    min_point → Mağaza-Kategori için minimum satır sayısı
+    Mağaza + Kategori bazında ürün gruplaması (ESKİ - kategori bazlı).
+    Artık kullanılmıyor, geriye dönük uyumluluk için tutuldu.
     """
     # ADIM 1: Mağaza + Kategori bazında aggregate + point sayısı
-    agg_dict = {col: 'sum' for col in metric_cols}
-    agg_dict['_point_count'] = (metric_cols[0], 'count')  # Satır sayısı
-
     store_cat_df = df.groupby([magaza_col, kategori_col], as_index=False).agg(
         **{col: (col, 'sum') for col in metric_cols},
         _point_count=(metric_cols[0], 'count')
     )
 
-    # Toplam metrik değeri hesapla (tüm metric'lerin toplamı)
     store_cat_df['_total_metric'] = store_cat_df[metric_cols].sum(axis=1)
-
-    # Point filtresi: min_point altındakileri işaretle (gruplama dışı)
     store_cat_df['_low_point'] = store_cat_df['_point_count'] < min_point
+    store_cat_df['Urun_Grubu'] = 1
 
-    # ADIM 2: Her kategori için mağazaları grupla (sadece yeterli point olanlar)
-    store_cat_df['Urun_Grubu'] = 0
+    return store_cat_df[[magaza_col, kategori_col, 'Urun_Grubu', '_total_metric']]
 
-    for kategori in store_cat_df[kategori_col].unique():
-        # Kategori maskesi + point filtresi (min_point üzeri olanlar)
-        cat_mask = store_cat_df[kategori_col] == kategori
-        point_mask = ~store_cat_df['_low_point']
-        mask = cat_mask & point_mask
 
-        # Low point olanları 0 olarak işaretle (gruplama dışı)
-        low_point_mask = cat_mask & store_cat_df['_low_point']
-        store_cat_df.loc[low_point_mask, 'Urun_Grubu'] = 0
+def calculate_weighted_score(df, metric_cols, weights):
+    """
+    Global Weighted Score hesapla (CoPilot yaklaşımı).
 
-        if mask.sum() == 0:
+    1. Her metriği Min-Max normalize et (0-1 arası)
+    2. Ağırlıklı toplam hesapla
+
+    Args:
+        df: DataFrame
+        metric_cols: Liste - normalize edilecek metrik kolonları
+        weights: Dict - {kolon_adı: ağırlık} şeklinde ağırlıklar
+
+    Returns:
+        Series: Weighted score değerleri
+    """
+    scores = pd.DataFrame(index=df.index)
+
+    for col in metric_cols:
+        if col not in df.columns:
             continue
 
-        subset = store_cat_df.loc[mask, '_total_metric'].copy()
+        values = df[col].copy()
 
-        # inf değerleri NaN yap
-        subset = subset.replace([np.inf, -np.inf], np.nan)
+        # NaN ve inf temizle
+        values = values.replace([np.inf, -np.inf], np.nan)
+        values = values.fillna(0)
+        values = values.clip(lower=0)  # Negatif değerleri 0 yap
 
-        # Yeterli veri kontrolü
-        non_null = subset.dropna()
-        if len(non_null) < 2:
-            store_cat_df.loc[mask, 'Urun_Grubu'] = 1
-            continue
+        # Min-Max Normalization (0-1 arası)
+        min_val = values.min()
+        max_val = values.max()
 
-        actual_clusters = min(n_clusters, len(non_null.unique()))
-        if actual_clusters < 2:
-            store_cat_df.loc[mask, 'Urun_Grubu'] = 1
-            continue
+        if max_val > min_val:
+            scores[col] = (values - min_val) / (max_val - min_val)
+        else:
+            scores[col] = 0.5  # Tüm değerler aynıysa 0.5 ata
 
-        # NaN'ları ortalama ile doldur
-        fill_value = subset.mean()
-        if pd.isna(fill_value):
-            fill_value = 0
-        X = subset.fillna(fill_value).values.reshape(-1, 1)
+    # Ağırlıklı toplam hesapla
+    weighted_score = pd.Series(0.0, index=df.index)
+    total_weight = 0
 
-        # inf kontrolü
-        X = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)
+    for col in metric_cols:
+        if col in scores.columns and col in weights:
+            weighted_score += scores[col] * weights[col]
+            total_weight += weights[col]
 
-        scaler = StandardScaler()
-        X_scaled = scaler.fit_transform(X)
-        X_scaled = np.nan_to_num(X_scaled, nan=0.0, posinf=0.0, neginf=0.0)
+    # Normalize et (toplam ağırlık 1 değilse)
+    if total_weight > 0:
+        weighted_score = weighted_score / total_weight
 
+    return weighted_score
+
+
+def kmeans_global_weighted(df, magaza_col, kategori_col, metric_cols, weights, n_clusters=3, desc=True):
+    """
+    Global Weighted Score tabanlı performans gruplaması.
+
+    1. Mağaza + Kategori bazında metrikleri topla
+    2. Weighted Score hesapla
+    3. Global K-Means ile performans grubu ata
+
+    desc=True → yüksek skor = 1 (Hızlı/TOP performans)
+    """
+    # ADIM 1: Mağaza + Kategori bazında aggregate
+    store_cat_df = df.groupby([magaza_col, kategori_col], as_index=False).agg(
+        **{col: (col, 'sum') for col in metric_cols},
+        _point_count=(metric_cols[0], 'count')
+    )
+
+    # ADIM 2: Weighted Score hesapla
+    store_cat_df['_weighted_score'] = calculate_weighted_score(
+        store_cat_df, metric_cols, weights
+    )
+
+    # ADIM 3: Global K-Means
+    X = store_cat_df['_weighted_score'].values.reshape(-1, 1)
+    X = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)
+
+    # Yeterli veri kontrolü
+    n_unique = len(np.unique(X))
+    actual_clusters = min(n_clusters, n_unique, len(X))
+
+    if actual_clusters < 2:
+        store_cat_df['Urun_Grubu'] = 1
+    else:
         kmeans = KMeans(n_clusters=actual_clusters, random_state=42, n_init=10)
-        clusters = kmeans.fit_predict(X_scaled)
+        clusters = kmeans.fit_predict(X)
 
-        # Sıralama: desc=True → yüksek değer = 1
-        cluster_values = subset.fillna(fill_value).values
-        means = {c: cluster_values[clusters == c].mean() for c in range(actual_clusters)}
+        # Sıralama: desc=True → yüksek skor = 1 (Hızlı)
+        means = {c: X[clusters == c].mean() for c in range(actual_clusters)}
         sorted_c = sorted(means.keys(), key=lambda x: means[x], reverse=desc)
         mapping = {old: new + 1 for new, old in enumerate(sorted_c)}
 
-        store_cat_df.loc[mask, 'Urun_Grubu'] = [mapping[c] for c in clusters]
+        store_cat_df['Urun_Grubu'] = [mapping[c] for c in clusters]
 
-    # ADIM 3: Sonucu döndür (join için kullanılacak)
-    return store_cat_df[[magaza_col, kategori_col, 'Urun_Grubu', '_total_metric']]
+    return store_cat_df[[magaza_col, kategori_col, 'Urun_Grubu', '_weighted_score']]
 
 
 def get_kapasite_label(grup_num, total):
@@ -634,8 +663,10 @@ def main():
         urun_kategori_col = None
         urun_metric_col   = None
         urun_fiyat_col    = None
+        urun_third_col    = None
         urun_grup_sayisi  = 3
         fiyat_grup_sayisi = 3
+        w1, w2, w3        = 40, 40, 20  # Default ağırlıklar
 
         if st.session_state.urun_df is not None:
             df_u           = st.session_state.urun_df
@@ -676,6 +707,20 @@ def main():
                 urun_fiyat_col = st.selectbox(
                     "💰 İkinci Metrik (Z-eksen)", options=fiyat_options, key='u_fiyat'
                 )
+
+                # Üçüncü metrik seçimi (opsiyonel)
+                third_options = [c for c in metric_options if c != urun_metric_col and c != urun_fiyat_col]
+                if third_options:
+                    urun_third_col = st.selectbox(
+                        "📊 Üçüncü Metrik (Opsiyonel)",
+                        options=['-- Seçme --'] + third_options,
+                        key='u_third'
+                    )
+                    if urun_third_col == '-- Seçme --':
+                        urun_third_col = None
+                else:
+                    urun_third_col = None
+
                 col_grp, col_pnt = st.columns(2)
                 with col_grp:
                     urun_grup_sayisi = st.number_input(
@@ -686,12 +731,54 @@ def main():
                         "Min Point (Mağaza-Kat)", min_value=1, max_value=1000, value=1, key='min_point',
                         help="Mağaza-Kategori kombinasyonunda en az kaç satır (point) olmalı"
                     )
+
+                # ═══════════════════════════════════════════════════════════════
+                # AĞIRLIK AYARLARI (Weighted Score için)
+                # ═══════════════════════════════════════════════════════════════
+                st.markdown("<hr>", unsafe_allow_html=True)
+                st.markdown('<div class="section-header">⚖️ Performans Ağırlıkları</div>',
+                            unsafe_allow_html=True)
+                st.caption("Weighted Score hesaplaması için metrik ağırlıkları (toplam: 100)")
+
+                # Ağırlık slider'ları
+                w1 = st.slider(
+                    f"📈 {urun_metric_col[:20]}...",
+                    min_value=0, max_value=100, value=40,
+                    key='weight_metric1',
+                    help="Birinci metriğin ağırlığı"
+                )
+                w2 = st.slider(
+                    f"💰 {urun_fiyat_col[:20]}...",
+                    min_value=0, max_value=100, value=40,
+                    key='weight_metric2',
+                    help="İkinci metriğin ağırlığı"
+                )
+                if urun_third_col:
+                    w3 = st.slider(
+                        f"📊 {urun_third_col[:20]}...",
+                        min_value=0, max_value=100, value=20,
+                        key='weight_metric3',
+                        help="Üçüncü metriğin ağırlığı"
+                    )
+                else:
+                    w3 = 0
+
+                total_weight = w1 + w2 + w3
+                if total_weight > 0:
+                    st.caption(f"✓ Toplam ağırlık: {total_weight} → Normalize edilecek")
+                else:
+                    st.warning("⚠️ En az bir ağırlık > 0 olmalı!")
+
             elif len(metric_options) == 1:
                 urun_metric_col = metric_options[0]
+                urun_third_col = None
                 min_point = 1
+                w1, w2, w3 = 100, 0, 0
                 st.warning("⚠️ İkinci metrik kolonu için yeterli sayısal kolon yok.")
             else:
+                urun_third_col = None
                 min_point = 1
+                w1, w2, w3 = 34, 33, 33
                 st.warning("⚠️ Sayısal kolon bulunamadı.")
 
             n_kat = df_u[urun_kategori_col].nunique() if urun_kategori_col else 0
@@ -787,17 +874,27 @@ def main():
                 unmatched = urun_df['Kapasite_Grubu'].eq('?').sum()
 
                 # ═══════════════════════════════════════════════════════════════
-                # K-MEANS CLUSTERING (Mağaza + Kategori Bazında)
+                # K-MEANS CLUSTERING (Global Weighted Score Tabanlı)
                 # ═══════════════════════════════════════════════════════════════
-                # Mağaza + Kategori bazında ürün gruplaması
+                # Metrik kolonları ve ağırlıkları hazırla
                 metric_cols_for_grouping = [urun_metric_col]
+                weights = {urun_metric_col: w1}
+
                 if urun_fiyat_col:
                     metric_cols_for_grouping.append(urun_fiyat_col)
+                    weights[urun_fiyat_col] = w2
 
-                store_cat_groups = kmeans_store_category(
+                if urun_third_col:
+                    metric_cols_for_grouping.append(urun_third_col)
+                    weights[urun_third_col] = w3
+
+                st.info(f"📊 Weighted Score: {', '.join([f'{k[:15]}={v}%' for k,v in weights.items()])}")
+
+                # Global Weighted Score tabanlı performans gruplaması
+                store_cat_groups = kmeans_global_weighted(
                     urun_df, urun_magaza_col, urun_kategori_col,
-                    metric_cols_for_grouping, n_clusters=urun_grup_sayisi, desc=desc_order,
-                    min_point=min_point
+                    metric_cols_for_grouping, weights,
+                    n_clusters=urun_grup_sayisi, desc=desc_order
                 )
 
                 # Ana veriye join et
@@ -814,6 +911,14 @@ def main():
                     urun_df['Urun_Grubu'].astype(str)
                 )
 
+                # Weighted Score'u da ana veriye ekle
+                urun_df = urun_df.merge(
+                    store_cat_groups[[urun_magaza_col, urun_kategori_col, '_weighted_score']],
+                    on=[urun_magaza_col, urun_kategori_col],
+                    how='left'
+                )
+                urun_df['_weighted_score'] = urun_df['_weighted_score'].fillna(0)
+
                 # Session config
                 st.session_state.final_results = urun_df
                 st.session_state.config = {
@@ -821,11 +926,13 @@ def main():
                     'urun_kategori_col': urun_kategori_col,
                     'urun_metric_col':   urun_metric_col,
                     'urun_fiyat_col':    urun_fiyat_col,
+                    'urun_third_col':    urun_third_col,
                     'kap_label':         kap_label,
                     'kap_attrs':         kap_attrs,
                     'kap_x_cols':        [f'_Kap_X_{c}' for c in kap_attrs],
                     'kap_x_labels':      {f'_Kap_X_{c}': c for c in kap_attrs},
                     'unmatched':         unmatched,
+                    'weights':           weights,
                 }
 
                 if unmatched > 0:
@@ -1022,6 +1129,10 @@ def main():
                     row[f'{urun_metric_col[:10]}_Ort'] = round(grp_data[urun_metric_col].mean(), 2)
                 if urun_fiyat_col and urun_fiyat_col in grp_data.columns:
                     row[f'{urun_fiyat_col[:10]}_Ort'] = round(grp_data[urun_fiyat_col].mean(), 2)
+
+                # Weighted Score ortalaması
+                if '_weighted_score' in grp_data.columns:
+                    row['W.Score_Ort'] = round(grp_data['_weighted_score'].mean(), 4)
 
                 summary_rows.append(row)
 
