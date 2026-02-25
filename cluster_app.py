@@ -1299,10 +1299,14 @@ def main():
 
             urun_metric_col = cfg.get('urun_metric_col')
             urun_fiyat_col = cfg.get('urun_fiyat_col')
+            urun_third_col = cfg.get('urun_third_col')
+
             if urun_metric_col:
                 show_cols.append(urun_metric_col)
             if urun_fiyat_col:
                 show_cols.append(urun_fiyat_col)
+            if urun_third_col:
+                show_cols.append(urun_third_col)
 
             # Gruplar
             show_cols.append('Urun_Grubu')
@@ -1345,7 +1349,28 @@ def main():
 
             # ── Detaylı Tablo ────────────────────────────────────────────────
             with st.expander("📋 Tüm Veriyi Göster", expanded=False):
-                st.dataframe(filtered[show_cols], height=420, use_container_width=True)
+                # Sayısal kolonları formatla (1.000.000 formatı)
+                display_df = filtered[show_cols].copy()
+
+                # Formatlanacak sayısal kolonlar
+                numeric_cols_to_format = [urun_metric_col, urun_fiyat_col, urun_third_col, '_weighted_score']
+                numeric_cols_to_format = [c for c in numeric_cols_to_format if c and c in display_df.columns]
+
+                # Kapasite kolonlarını da ekle
+                for kap_col in kap_x_cols:
+                    if kap_col in display_df.columns:
+                        numeric_cols_to_format.append(kap_col)
+
+                # Formatlama uygula
+                for col in numeric_cols_to_format:
+                    if col == '_weighted_score':
+                        # W.Score 2 ondalık
+                        display_df[col] = display_df[col].apply(lambda x: f"{x:.2f}".replace(".", ",") if pd.notna(x) else '-')
+                    else:
+                        # Diğerleri tam sayı, binlik ayırıcılı
+                        display_df[col] = display_df[col].apply(lambda x: f"{int(round(x)):,}".replace(",", ".") if pd.notna(x) else '-')
+
+                st.dataframe(display_df, height=420, use_container_width=True)
 
         else:
             # Demo 3D animasyon + yönlendirme
