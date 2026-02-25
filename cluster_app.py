@@ -372,7 +372,7 @@ def kmeans_global_weighted(df, magaza_col, kategori_col, metric_cols, weights, n
 
     1. Mağaza + Kategori bazında metrikleri topla
     2. Weighted Score hesapla
-    3. Global K-Means ile performans grubu ata
+    3. Quantile-based bölme ile MUTLAKA n_clusters grup oluştur
 
     desc=True → yüksek skor = 1 (Hızlı/TOP performans)
     """
@@ -387,28 +387,110 @@ def kmeans_global_weighted(df, magaza_col, kategori_col, metric_cols, weights, n
         store_cat_df, metric_cols, weights
     )
 
-    # ADIM 3: Global K-Means
-    X = store_cat_df['_weighted_score'].values.reshape(-1, 1)
-    X = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)
+    # ADIM 3: Quantile-based bölme (HER ZAMAN n_clusters grup oluşturur)
+    scores = store_cat_df['_weighted_score'].copy()
+    scores = scores.replace([np.inf, -np.inf], np.nan).fillna(0)
 
-    # Yeterli veri kontrolü
-    n_unique = len(np.unique(X))
-    actual_clusters = min(n_clusters, n_unique, len(X))
+    # Quantile sınırlarını hesapla
+    try:
+        # qcut ile eşit sayıda eleman içeren gruplar oluştur
+        if desc:
+            # Yüksek skor = 1 (Hızlı), Düşük skor = 3 (Yavaş)
+            labels = list(range(1, n_clusters + 1))  # [1, 2, 3]
+            store_cat_df['Urun_Grubu'] = pd.qcut(
+                scores.rank(method='first'),  # Rank kullanarak duplicate sorununu çöz
+                q=n_clusters,
+                labels=labels[::-1]  # Ters çevir: yüksek değer = 1
+            ).astype(int)
+        else:
+            # Düşük skor = 1, Yüksek skor = 3
+            labels = list(range(1, n_clusters + 1))
+            store_cat_df['Urun_Grubu'] = pd.qcut(
+                scores.rank(method='first'),
+                q=n_clusters,
+                labels=labels
+            ).astype(int)
+    except ValueError:
+        # Çok az unique değer varsa, percentile-based manuel bölme yap
+        percentiles = [scores.quantile(i / n_clusters) for i in range(n_clusters + 1)]
 
-    if actual_clusters < 2:
-        store_cat_df['Urun_Grubu'] = 1
-    else:
-        kmeans = KMeans(n_clusters=actual_clusters, random_state=42, n_init=10)
-        clusters = kmeans.fit_predict(X)
+        def assign_group(val):
+            for i in range(n_clusters):
+                if val <= percentiles[i + 1]:
+                    return (n_clusters - i) if desc else (i + 1)
+            return 1 if desc else n_clusters
 
-        # Sıralama: desc=True → yüksek skor = 1 (Hızlı)
-        means = {c: X[clusters == c].mean() for c in range(actual_clusters)}
-        sorted_c = sorted(means.keys(), key=lambda x: means[x], reverse=desc)
-        mapping = {old: new + 1 for new, old in enumerate(sorted_c)}
-
-        store_cat_df['Urun_Grubu'] = [mapping[c] for c in clusters]
+        store_cat_df['Urun_Grubu'] = scores.apply(assign_group)
 
     return store_cat_df[[magaza_col, kategori_col, 'Urun_Grubu', '_weighted_score']]
+
+
+def quantile_category_based(df, magaza_col, kategori_col, metric_cols, weights, n_clusters=3, desc=True):
+    """
+    Kategori bazlı Quantile performans gruplaması.
+
+    Her kategori için AYRI gruplama yapar.
+    Quantile kullanarak HER KATEGORİDE mutlaka n_clusters grup oluşturur.
+
+    desc=True → yüksek skor = 1 (Hızlı/TOP performans)
+    """
+    # ADIM 1: Mağaza + Kategori bazında aggregate
+    store_cat_df = df.groupby([magaza_col, kategori_col], as_index=False).agg(
+        **{col: (col, 'sum') for col in metric_cols},
+        _point_count=(metric_cols[0], 'count')
+    )
+
+    # ADIM 2: Weighted Score hesapla
+    store_cat_df['_weighted_score_cat'] = calculate_weighted_score(
+        store_cat_df, metric_cols, weights
+    )
+
+    # ADIM 3: Her kategori için AYRI quantile-based gruplama
+    store_cat_df['Urun_Grubu_Kat'] = 0
+
+    for kategori in store_cat_df[kategori_col].unique():
+        mask = store_cat_df[kategori_col] == kategori
+        subset = store_cat_df.loc[mask, '_weighted_score_cat'].copy()
+
+        if len(subset) < n_clusters:
+            # Çok az veri varsa, mevcut sıralamaya göre ata
+            ranks = subset.rank(method='first', ascending=not desc)
+            store_cat_df.loc[mask, 'Urun_Grubu_Kat'] = ((ranks - 1) * n_clusters / len(subset)).astype(int) + 1
+            store_cat_df.loc[mask, 'Urun_Grubu_Kat'] = store_cat_df.loc[mask, 'Urun_Grubu_Kat'].clip(1, n_clusters)
+            continue
+
+        try:
+            # Quantile bölme
+            if desc:
+                labels = list(range(1, n_clusters + 1))
+                groups = pd.qcut(
+                    subset.rank(method='first'),
+                    q=n_clusters,
+                    labels=labels[::-1]
+                ).astype(int)
+            else:
+                labels = list(range(1, n_clusters + 1))
+                groups = pd.qcut(
+                    subset.rank(method='first'),
+                    q=n_clusters,
+                    labels=labels
+                ).astype(int)
+
+            store_cat_df.loc[mask, 'Urun_Grubu_Kat'] = groups.values
+
+        except ValueError:
+            # Fallback: percentile-based manuel bölme
+            percentiles = [subset.quantile(i / n_clusters) for i in range(n_clusters + 1)]
+
+            def assign_group(val):
+                for i in range(n_clusters):
+                    if val <= percentiles[i + 1]:
+                        return (n_clusters - i) if desc else (i + 1)
+                return 1 if desc else n_clusters
+
+            store_cat_df.loc[mask, 'Urun_Grubu_Kat'] = subset.apply(assign_group).values
+
+    return store_cat_df[[magaza_col, kategori_col, 'Urun_Grubu_Kat', '_weighted_score_cat']]
 
 
 def get_kapasite_label(grup_num, total):
@@ -890,34 +972,52 @@ def main():
 
                 st.info(f"📊 Weighted Score: {', '.join([f'{k[:15]}={v}%' for k,v in weights.items()])}")
 
-                # Global Weighted Score tabanlı performans gruplaması
-                store_cat_groups = kmeans_global_weighted(
+                # ═══════════════════════════════════════════════════════════════
+                # 1) GLOBAL Weighted Score tabanlı performans gruplaması
+                # ═══════════════════════════════════════════════════════════════
+                store_cat_global = kmeans_global_weighted(
                     urun_df, urun_magaza_col, urun_kategori_col,
                     metric_cols_for_grouping, weights,
                     n_clusters=urun_grup_sayisi, desc=desc_order
                 )
 
-                # Ana veriye join et
+                # ═══════════════════════════════════════════════════════════════
+                # 2) KATEGORİ BAZLI Quantile performans gruplaması
+                # ═══════════════════════════════════════════════════════════════
+                store_cat_kategori = quantile_category_based(
+                    urun_df, urun_magaza_col, urun_kategori_col,
+                    metric_cols_for_grouping, weights,
+                    n_clusters=urun_grup_sayisi, desc=desc_order
+                )
+
+                # Ana veriye GLOBAL sonuçları join et
                 urun_df = urun_df.merge(
-                    store_cat_groups[[urun_magaza_col, urun_kategori_col, 'Urun_Grubu']],
+                    store_cat_global[[urun_magaza_col, urun_kategori_col, 'Urun_Grubu', '_weighted_score']],
                     on=[urun_magaza_col, urun_kategori_col],
                     how='left'
                 )
                 urun_df['Urun_Grubu'] = urun_df['Urun_Grubu'].fillna(1).astype(int)
+                urun_df['_weighted_score'] = urun_df['_weighted_score'].fillna(0)
 
-                # Kombine Grup → 1-1, 1-2, ... 3-3 format
+                # Ana veriye KATEGORİ BAZLI sonuçları join et
+                urun_df = urun_df.merge(
+                    store_cat_kategori[[urun_magaza_col, urun_kategori_col, 'Urun_Grubu_Kat']],
+                    on=[urun_magaza_col, urun_kategori_col],
+                    how='left'
+                )
+                urun_df['Urun_Grubu_Kat'] = urun_df['Urun_Grubu_Kat'].fillna(1).astype(int)
+
+                # Kombine Gruplar → 1-1, 1-2, ... 3-3 format
+                # GLOBAL
                 urun_df['Kombine_Grup'] = (
                     urun_df['Kapasite_Grubu'].astype(str) + '-' +
                     urun_df['Urun_Grubu'].astype(str)
                 )
-
-                # Weighted Score'u da ana veriye ekle
-                urun_df = urun_df.merge(
-                    store_cat_groups[[urun_magaza_col, urun_kategori_col, '_weighted_score']],
-                    on=[urun_magaza_col, urun_kategori_col],
-                    how='left'
+                # KATEGORİ BAZLI
+                urun_df['Kombine_Grup_Kat'] = (
+                    urun_df['Kapasite_Grubu'].astype(str) + '-' +
+                    urun_df['Urun_Grubu_Kat'].astype(str)
                 )
-                urun_df['_weighted_score'] = urun_df['_weighted_score'].fillna(0)
 
                 # Session config
                 st.session_state.final_results = urun_df
@@ -968,7 +1068,8 @@ def main():
             <div class="legend-box">
                 <b>Format → 1-1, 1-2, ... 3-3</b><br>
                 <b>Kapasite Grubu:</b> 1 / 2 / 3 — Mağaza bazlı (global K-Means)<br>
-                <b>Ürün Grubu:</b> 1 / 2 / 3 — Mağaza+Kategori bazlı K-Means
+                <b>Ürün Grubu (Global):</b> Tüm kategoriler birlikte → Tutarlı ciro sıralaması<br>
+                <b>Ürün Grubu (Kategori):</b> Her kategori ayrı → Her kategoride 9 grup garantili
             </div>
             """, unsafe_allow_html=True)
 
@@ -1083,7 +1184,15 @@ def main():
             # ══════════════════════════════════════════════════════════════════
             # KOMBİNE GRUP ÖZETİ — DETAYLI İSTATİSTİK
             # ══════════════════════════════════════════════════════════════════
-            st.markdown("**📊 Kombine Grup Özeti**")
+            ozet_tipi = st.radio(
+                "Özet Tipi",
+                options=['🌍 Global (Tutarlı Ciro)', '📂 Kategori Bazlı (9 Grup Garantili)'],
+                horizontal=True, key='ozet_tipi'
+            )
+
+            is_global = ozet_tipi.startswith('🌍')
+            grup_col = 'Kombine_Grup' if is_global else 'Kombine_Grup_Kat'
+            st.markdown(f"**📊 Kombine Grup Özeti — {'Global' if is_global else 'Kategori Bazlı'}**")
 
             # Kapasite değişkenini belirle
             if len(kap_x_cols) > 1:
@@ -1096,15 +1205,20 @@ def main():
 
             # Grup sırası: 1-1, 1-2, 1-3, 2-1, 2-2, 2-3, 3-1, 3-2, 3-3
             group_order = ['1-1', '1-2', '1-3', '2-1', '2-2', '2-3', '3-1', '3-2', '3-3']
-            all_groups = [g for g in group_order if g in filtered['Kombine_Grup'].values]
-            # Eğer farklı gruplar varsa ekle
-            for g in sorted(filtered['Kombine_Grup'].unique()):
-                if g not in all_groups:
-                    all_groups.append(g)
+
+            # Seçilen grup kolonuna göre filtreleme
+            if grup_col in filtered.columns:
+                all_groups = [g for g in group_order if g in filtered[grup_col].values]
+                for g in sorted(filtered[grup_col].unique()):
+                    if g not in all_groups:
+                        all_groups.append(g)
+            else:
+                all_groups = [g for g in group_order if g in filtered['Kombine_Grup'].values]
+                grup_col = 'Kombine_Grup'
 
             summary_rows = []
             for grp in all_groups:
-                grp_data = filtered[filtered['Kombine_Grup'] == grp]
+                grp_data = filtered[filtered[grup_col] == grp]
                 if len(grp_data) == 0:
                     continue
                 n = len(grp_data)
@@ -1207,9 +1321,21 @@ def main():
                 show_cols.append(urun_metric_col)
             if urun_fiyat_col:
                 show_cols.append(urun_fiyat_col)
+
+            # Global gruplar
             show_cols.append('Urun_Grubu')
             show_cols.append('Kombine_Grup')
             show_cols.append('Grup_Ismi')
+
+            # Kategori bazlı gruplar
+            if 'Urun_Grubu_Kat' in results.columns:
+                show_cols.append('Urun_Grubu_Kat')
+            if 'Kombine_Grup_Kat' in results.columns:
+                show_cols.append('Kombine_Grup_Kat')
+                # Kategori bazlı grup ismi de ekle
+                results['Grup_Ismi_Kat'] = results['Kombine_Grup_Kat'].map(st.session_state.grup_isimleri)
+                st.session_state.final_results['Grup_Ismi_Kat'] = st.session_state.final_results['Kombine_Grup_Kat'].map(st.session_state.grup_isimleri)
+                show_cols.append('Grup_Ismi_Kat')
 
             show_cols = list(dict.fromkeys(show_cols))  # Remove duplicates
             show_cols = [c for c in show_cols if c in results.columns]  # Only existing columns
