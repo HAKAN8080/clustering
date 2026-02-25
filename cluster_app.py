@@ -1187,6 +1187,12 @@ def main():
                 all_groups = [g for g in group_order if g in filtered['Kombine_Grup'].values]
                 grup_col = 'Kombine_Grup'
 
+            # Sayı formatlama fonksiyonu (1.000.000 formatı, ondalıksız)
+            def fmt_num(val):
+                if pd.isna(val):
+                    return '-'
+                return f"{int(round(val)):,}".replace(",", ".")
+
             summary_rows = []
             for grp in all_groups:
                 grp_data = filtered[filtered[grup_col] == grp]
@@ -1203,21 +1209,26 @@ def main():
                 row = {
                     'Grup': grp,
                     'Grup İsmi': grup_ismi,
-                    'Satır': n,
-                    'Mağaza': n_mag,
-                    f'{kap_stat_name}_Ort': round(kv.mean(), 2),
+                    'Satır': fmt_num(n),
+                    'Mağaza': fmt_num(n_mag),
+                    f'{kap_stat_name[:15]}': fmt_num(kv.mean()),
                 }
 
                 urun_metric_col = cfg.get('urun_metric_col')
                 urun_fiyat_col = cfg.get('urun_fiyat_col')
-                if urun_metric_col and urun_metric_col in grp_data.columns:
-                    row[f'{urun_metric_col[:10]}_Ort'] = round(grp_data[urun_metric_col].mean(), 2)
-                if urun_fiyat_col and urun_fiyat_col in grp_data.columns:
-                    row[f'{urun_fiyat_col[:10]}_Ort'] = round(grp_data[urun_fiyat_col].mean(), 2)
+                urun_third_col = cfg.get('urun_third_col')
 
-                # Weighted Score ortalaması
+                if urun_metric_col and urun_metric_col in grp_data.columns:
+                    row[f'{urun_metric_col[:15]}'] = fmt_num(grp_data[urun_metric_col].mean())
+                if urun_fiyat_col and urun_fiyat_col in grp_data.columns:
+                    row[f'{urun_fiyat_col[:15]}'] = fmt_num(grp_data[urun_fiyat_col].mean())
+                if urun_third_col and urun_third_col in grp_data.columns:
+                    row[f'{urun_third_col[:15]}'] = fmt_num(grp_data[urun_third_col].mean())
+
+                # Weighted Score ortalaması (bu 0-1 arası, 2 ondalık yeterli)
                 if '_weighted_score' in grp_data.columns:
-                    row['W.Score_Ort'] = round(grp_data['_weighted_score'].mean(), 4)
+                    ws = grp_data['_weighted_score'].mean()
+                    row['W.Score'] = f"{ws:.2f}".replace(".", ",")
 
                 summary_rows.append(row)
 
