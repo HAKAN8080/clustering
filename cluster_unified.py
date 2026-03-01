@@ -490,19 +490,59 @@ def main():
         """, unsafe_allow_html=True)
 
     # ═══════════════════════════════════════════════════════════════════════════
-    # MODEL SEÇİMİ (Sidebar)
+    # MODEL SEÇİMİ (Ana Sayfa + Sidebar)
     # ═══════════════════════════════════════════════════════════════════════════
-    with st.sidebar:
-        st.markdown("## 🎯 Model Seçimi")
 
-        model = st.radio(
-            "Algoritma",
-            options=["Thorius Algorithm", "CoPilot V3"],
-            index=0,
-            key='model_select',
-            label_visibility="collapsed"
+    # Ana başlık
+    st.markdown("""
+    <div class="app-header">
+        <h1>📊 Cluster <span>Analizi</span></h1>
+        <div class="sub">Thorius Algorithm & CoPilot V3 | K-Means Clustering</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # Model seçimi - ANA SAYFADA
+    st.markdown("### 🎯 Algoritma Seçin")
+    col_m1, col_m2 = st.columns(2)
+
+    with col_m1:
+        thorius_selected = st.button(
+            "📦 Thorius Algorithm",
+            use_container_width=True,
+            type="primary" if st.session_state.get('model') != "CoPilot V3" else "secondary",
+            key='btn_thorius'
         )
-        st.session_state.model = model
+        st.caption("Kapasite + Kategori bazlı | 1-1 → 3-3")
+
+    with col_m2:
+        copilot_selected = st.button(
+            "🎯 CoPilot V3",
+            use_container_width=True,
+            type="primary" if st.session_state.get('model') == "CoPilot V3" else "secondary",
+            key='btn_copilot'
+        )
+        st.caption("LivingArea bazlı | TOP/MID/ALL + Min-10")
+
+    # Buton tıklamalarını işle
+    if thorius_selected:
+        st.session_state.model = "Thorius Algorithm"
+        st.rerun()
+    if copilot_selected:
+        st.session_state.model = "CoPilot V3"
+        st.rerun()
+
+    # Varsayılan model
+    if 'model' not in st.session_state or st.session_state.model is None:
+        st.session_state.model = "Thorius Algorithm"
+
+    model = st.session_state.model
+
+    st.markdown("<hr>", unsafe_allow_html=True)
+
+    # Sidebar'da da göster
+    with st.sidebar:
+        st.markdown("## 🎯 Aktif Model")
+        st.info(f"**{model}**")
 
         st.markdown("<hr>", unsafe_allow_html=True)
 
@@ -530,12 +570,7 @@ def main():
     # THORIUS ALGORITHM
     # ═══════════════════════════════════════════════════════════════════════════
     if model == "Thorius Algorithm":
-        st.markdown("""
-        <div class="app-header">
-            <h1>📊 Thorius <span>Algorithm</span></h1>
-            <div class="sub">Kapasite + Ürün Performans | K-Means Clustering</div>
-        </div>
-        """, unsafe_allow_html=True)
+        st.markdown("### 📦 Thorius Algorithm")
 
         col_left, col_right = st.columns([1, 2.5])
 
@@ -680,9 +715,24 @@ def main():
                 # KPI
                 c1, c2, c3, c4 = st.columns(4)
                 c1.metric("Satır", f"{len(results):,}")
-                c2.metric("Mağaza", f"{results[cfg['magaza_col']].nunique():,}")
-                c3.metric("Kategori", f"{results[cfg['kategori_col']].nunique():,}")
-                c4.metric("Kombine Grup", f"{results['Kombine_Grup'].nunique()}")
+
+                magaza_col = cfg.get('magaza_col', None)
+                kategori_col = cfg.get('kategori_col', None)
+
+                if magaza_col and magaza_col in results.columns:
+                    c2.metric("Mağaza", f"{results[magaza_col].nunique():,}")
+                else:
+                    c2.metric("Mağaza", "-")
+
+                if kategori_col and kategori_col in results.columns:
+                    c3.metric("Kategori", f"{results[kategori_col].nunique():,}")
+                else:
+                    c3.metric("Kategori", "-")
+
+                if 'Kombine_Grup' in results.columns:
+                    c4.metric("Kombine Grup", f"{results['Kombine_Grup'].nunique()}")
+                else:
+                    c4.metric("Kombine Grup", "-")
 
                 st.markdown("<hr>", unsafe_allow_html=True)
 
@@ -714,6 +764,8 @@ def main():
 
                 summary_rows = []
                 for grp in order:
+                    if 'Kombine_Grup' not in results.columns:
+                        break
                     grp_data = results[results['Kombine_Grup'] == grp]
                     if len(grp_data) == 0:
                         continue
@@ -721,11 +773,14 @@ def main():
                     row = {
                         'Grup': grp,
                         'Satır': f"{len(grp_data):,}".replace(",", "."),
-                        'Mağaza': f"{grp_data[cfg['magaza_col']].nunique():,}".replace(",", "."),
                     }
 
+                    if magaza_col and magaza_col in grp_data.columns:
+                        row['Mağaza'] = f"{grp_data[magaza_col].nunique():,}".replace(",", ".")
+
                     # Metrik ortalamaları
-                    for metric in cfg['metrics'][:3]:
+                    metrics = cfg.get('metrics', [])
+                    for metric in metrics[:3]:
                         if metric in grp_data.columns:
                             avg = grp_data[metric].mean()
                             row[metric[:15]] = f"{int(avg):,}".replace(",", ".")
@@ -742,12 +797,13 @@ def main():
                     st.dataframe(summary_df, hide_index=True, use_container_width=True)
 
                 # 3D Scatter (eğer kapasite kolonu varsa)
-                if cfg.get('kap_attrs') and len(cfg['kap_attrs']) > 0:
+                kap_attrs = cfg.get('kap_attrs', [])
+                if kap_attrs and len(kap_attrs) > 0:
                     st.markdown("<hr>", unsafe_allow_html=True)
                     st.markdown("**🎯 3D Scatter**")
 
-                    kap_col = cfg['kap_attrs'][0]
-                    metric_col = cfg['metrics'][0] if cfg['metrics'] else None
+                    kap_col = kap_attrs[0]
+                    metric_col = metrics[0] if metrics else None
 
                     if metric_col and kap_col in results.columns and metric_col in results.columns:
                         sample_df = results.sample(min(3000, len(results)))
@@ -785,10 +841,18 @@ def main():
 
                 # Detaylı Tablo
                 with st.expander("📋 Tüm Veriyi Göster", expanded=False):
-                    show_cols = [cfg['magaza_col'], cfg['kategori_col'], 'Kapasite_Grubu', 'Urun_Grubu', 'Kombine_Grup']
-                    show_cols += cfg['metrics'][:3]
+                    show_cols = []
+                    if magaza_col:
+                        show_cols.append(magaza_col)
+                    if kategori_col:
+                        show_cols.append(kategori_col)
+                    show_cols += ['Kapasite_Grubu', 'Urun_Grubu', 'Kombine_Grup']
+                    show_cols += cfg.get('metrics', [])[:3]
                     show_cols = [c for c in show_cols if c in results.columns]
-                    st.dataframe(results[show_cols], height=400, use_container_width=True)
+                    if show_cols:
+                        st.dataframe(results[show_cols], height=400, use_container_width=True)
+                    else:
+                        st.dataframe(results, height=400, use_container_width=True)
 
             else:
                 st.info("👈 Sol panelden veri yükleyip hesaplayın")
@@ -812,12 +876,7 @@ def main():
     # COPILOT V3
     # ═══════════════════════════════════════════════════════════════════════════
     else:
-        st.markdown("""
-        <div class="app-header">
-            <h1>🎯 CoPilot <span>V3</span></h1>
-            <div class="sub">LivingArea · MainGroup · SubGroup | Weighted K-Means + Min-10</div>
-        </div>
-        """, unsafe_allow_html=True)
+        st.markdown("### 🎯 CoPilot V3")
 
         col_left, col_right = st.columns([1, 2.5])
 
@@ -919,10 +978,17 @@ def main():
         with col_right:
             st.markdown('<div class="section-header-blue">📊 Sonuçlar</div>', unsafe_allow_html=True)
 
-            if st.session_state.results is not None:
+            if st.session_state.results is not None and st.session_state.config is not None:
                 results = st.session_state.results
                 cfg = st.session_state.config
-                cluster_col = "CO_PilotCluster_min10" if cfg['enable_min10'] and "CO_PilotCluster_min10" in results.columns else "CO_PilotCluster"
+
+                enable_min10 = cfg.get('enable_min10', False)
+                cluster_col = "CO_PilotCluster_min10" if enable_min10 and "CO_PilotCluster_min10" in results.columns else "CO_PilotCluster"
+
+                # Fallback if cluster_col doesn't exist
+                if cluster_col not in results.columns:
+                    cluster_col = [c for c in results.columns if 'Cluster' in c or 'cluster' in c]
+                    cluster_col = cluster_col[0] if cluster_col else None
 
                 # Legend
                 st.markdown("""
@@ -936,27 +1002,37 @@ def main():
                 # KPI
                 c1, c2, c3 = st.columns(3)
                 c1.metric("Satır", f"{len(results):,}")
-                c2.metric("Grup", f"{results[cfg['keys']].drop_duplicates().shape[0]:,}")
-                c3.metric("Cluster", f"{results[cluster_col].nunique()}")
+
+                keys = cfg.get('keys', [])
+                if keys and all(k in results.columns for k in keys):
+                    c2.metric("Grup", f"{results[keys].drop_duplicates().shape[0]:,}")
+                else:
+                    c2.metric("Grup", "-")
+
+                if cluster_col and cluster_col in results.columns:
+                    c3.metric("Cluster", f"{results[cluster_col].nunique()}")
+                else:
+                    c3.metric("Cluster", "-")
 
                 # Dağılım
-                st.markdown("<hr>", unsafe_allow_html=True)
-                counts = results[cluster_col].value_counts().reset_index()
-                counts.columns = ['Cluster', 'Count']
+                if cluster_col and cluster_col in results.columns:
+                    st.markdown("<hr>", unsafe_allow_html=True)
+                    counts = results[cluster_col].value_counts().reset_index()
+                    counts.columns = ['Cluster', 'Count']
 
-                order = ['TOP1', 'TOP2', 'TOP3', 'MID1', 'MID2', 'MID3', 'ALL1', 'ALL2', 'ALL3']
-                counts['sort'] = counts['Cluster'].apply(lambda x: order.index(x) if x in order else 99)
-                counts = counts.sort_values('sort').drop('sort', axis=1)
+                    order = ['TOP1', 'TOP2', 'TOP3', 'MID1', 'MID2', 'MID3', 'ALL1', 'ALL2', 'ALL3']
+                    counts['sort'] = counts['Cluster'].apply(lambda x: order.index(x) if x in order else 99)
+                    counts = counts.sort_values('sort').drop('sort', axis=1)
 
-                color_map = {
-                    'TOP1': '#006100', 'TOP2': '#38761d', 'TOP3': '#6aa84f',
-                    'MID1': '#9C5700', 'MID2': '#b8860b', 'MID3': '#daa520',
-                    'ALL1': '#9C0006', 'ALL2': '#cc0000', 'ALL3': '#ea9999',
-                }
+                    color_map = {
+                        'TOP1': '#006100', 'TOP2': '#38761d', 'TOP3': '#6aa84f',
+                        'MID1': '#9C5700', 'MID2': '#b8860b', 'MID3': '#daa520',
+                        'ALL1': '#9C0006', 'ALL2': '#cc0000', 'ALL3': '#ea9999',
+                    }
 
-                fig = px.bar(counts, x='Cluster', y='Count', color='Cluster', color_discrete_map=color_map, height=300)
-                fig.update_layout(showlegend=False)
-                st.plotly_chart(fig, use_container_width=True)
+                    fig = px.bar(counts, x='Cluster', y='Count', color='Cluster', color_discrete_map=color_map, height=300)
+                    fig.update_layout(showlegend=False)
+                    st.plotly_chart(fig, use_container_width=True)
 
                 # İndir
                 st.markdown("<hr>", unsafe_allow_html=True)
