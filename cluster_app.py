@@ -755,93 +755,201 @@ def main():
                 else:
                     c4.metric("Cluster", "-")
 
+                # Filtreler
                 st.markdown("<hr>", unsafe_allow_html=True)
+                st.markdown('<div class="section-header-orange">🔍 Filtreler</div>', unsafe_allow_html=True)
 
-                # Kategori Filtresi
-                if kategori_col and kategori_col in results.columns:
-                    kategoriler = ['🔄 Tümü'] + sorted(results[kategori_col].dropna().unique().tolist())
-                    selected_kat = st.selectbox("🏷️ Kategori Filtre", kategoriler, key='th_filter')
+                filtered = results.copy()
 
-                    if selected_kat != '🔄 Tümü':
-                        filtered = results[results[kategori_col] == selected_kat]
-                    else:
-                        filtered = results
-                else:
-                    filtered = results
+                col_f1, col_f2 = st.columns(2)
+
+                with col_f1:
+                    # Kategori Filtresi
+                    if kategori_col and kategori_col in results.columns:
+                        kategoriler = ['🔄 Tümü'] + sorted(results[kategori_col].dropna().unique().tolist())
+                        selected_kat = st.selectbox(f"🏷️ {kategori_col}", kategoriler, key='th_filter_kat')
+
+                        if selected_kat != '🔄 Tümü':
+                            filtered = filtered[filtered[kategori_col] == selected_kat]
+
+                with col_f2:
+                    # Cluster Filtresi
+                    if 'Cluster_Kod' in results.columns:
+                        cluster_opts = ['🔄 Tümü'] + sorted(results['Cluster_Kod'].dropna().unique().tolist())
+                        selected_cluster = st.selectbox("📊 Cluster", cluster_opts, key='th_filter_cluster')
+
+                        if selected_cluster != '🔄 Tümü':
+                            filtered = filtered[filtered['Cluster_Kod'] == selected_cluster]
+
+                # Filtre sonucu bilgisi
+                if len(filtered) < len(results):
+                    st.caption(f"📊 Filtrelenmiş: {len(filtered):,} / {len(results):,} satır ({100*len(filtered)/len(results):.1f}%)")
 
                 st.markdown("<hr>", unsafe_allow_html=True)
 
                 # Grup Dağılımı
                 st.markdown("**📊 Cluster Dağılımı**")
-                if 'Cluster_Kod' in filtered.columns:
-                    counts = filtered['Cluster_Kod'].value_counts().reset_index()
+                if 'Cluster_Detay' in filtered.columns:
+                    counts = filtered['Cluster_Detay'].value_counts().reset_index()
                     counts.columns = ['Cluster', 'Count']
 
-                    # Sıralama: TOP1, TOP2, TOP3, MID4, MID5, MID6, ALL7, ALL8, ALL9
-                    order = ['TOP1', 'TOP2', 'TOP3', 'MID4', 'MID5', 'MID6', 'ALL7', 'ALL8', 'ALL9']
+                    # Sıralama (açık isimlerle)
+                    order = ['TOP1-Büyük-Hızlı', 'TOP2-Orta-Hızlı', 'TOP3-Büyük-Orta',
+                             'MID4-Küçük-Hızlı', 'MID5-Orta-Orta', 'MID6-Küçük-Orta',
+                             'ALL7-Büyük-Yavaş', 'ALL8-Orta-Yavaş', 'ALL9-Küçük-Yavaş']
                     counts['sort'] = counts['Cluster'].apply(lambda x: order.index(x) if x in order else 99)
                     counts = counts.sort_values('sort').drop('sort', axis=1)
 
-                    # Renk haritası
+                    # Renk haritası (açık isimlerle)
                     color_map = {
-                        'TOP1': '#006100', 'TOP2': '#38761d', 'TOP3': '#6aa84f',
-                        'MID4': '#9C5700', 'MID5': '#b8860b', 'MID6': '#daa520',
-                        'ALL7': '#9C0006', 'ALL8': '#cc0000', 'ALL9': '#ea9999',
+                        'TOP1-Büyük-Hızlı': '#006100', 'TOP2-Orta-Hızlı': '#38761d', 'TOP3-Büyük-Orta': '#6aa84f',
+                        'MID4-Küçük-Hızlı': '#9C5700', 'MID5-Orta-Orta': '#b8860b', 'MID6-Küçük-Orta': '#daa520',
+                        'ALL7-Büyük-Yavaş': '#9C0006', 'ALL8-Orta-Yavaş': '#cc0000', 'ALL9-Küçük-Yavaş': '#ea9999',
                     }
 
                     fig = px.bar(counts, x='Cluster', y='Count', color='Cluster',
                                  color_discrete_map=color_map, height=300)
                     fig.update_layout(showlegend=False, margin=dict(l=0, r=0, t=10, b=0))
+                    fig.update_xaxes(tickangle=45)
                     st.plotly_chart(fig, use_container_width=True)
 
-                # Özet Tablo
+                # ═══════════════════════════════════════════════════════════════════════════
+                # DETAYLI İSTATİSTİK TABLOSU
+                # ═══════════════════════════════════════════════════════════════════════════
                 st.markdown("<hr>", unsafe_allow_html=True)
-                st.markdown("**📋 Cluster Özet Tablosu**")
+                st.markdown('<div class="section-header-green">📊 Detaylı Cluster İstatistikleri</div>', unsafe_allow_html=True)
 
-                summary_rows = []
-                for grp in order:
-                    if 'Cluster_Kod' not in filtered.columns:
-                        break
-                    grp_data = filtered[filtered['Cluster_Kod'] == grp]
-                    if len(grp_data) == 0:
-                        continue
+                metrics = cfg.get('metrics', [])
+                kap_attrs = cfg.get('kap_attrs', [])
 
-                    # Detay bilgisi al
-                    detay = grp_data['Cluster_Detay'].iloc[0] if 'Cluster_Detay' in grp_data.columns and len(grp_data) > 0 else grp
+                if 'Cluster_Kod' in filtered.columns:
+                    # Cluster bazında istatistikler
+                    stats_rows = []
+                    cluster_order = ['TOP1', 'TOP2', 'TOP3', 'MID4', 'MID5', 'MID6', 'ALL7', 'ALL8', 'ALL9']
 
-                    row = {
-                        'Cluster': detay,
-                        'Satır': f"{len(grp_data):,}".replace(",", "."),
-                    }
+                    # Her cluster için istatistik hesapla
+                    cluster_means = {}
+                    cluster_vars = {}
 
-                    if magaza_col and magaza_col in grp_data.columns:
-                        row['Mağaza'] = f"{grp_data[magaza_col].nunique():,}".replace(",", ".")
+                    for clust in cluster_order:
+                        clust_data = filtered[filtered['Cluster_Kod'] == clust]
+                        if len(clust_data) == 0:
+                            continue
 
-                    # Metrik ortalamaları
-                    metrics = cfg.get('metrics', [])
-                    for metric in metrics[:3]:
-                        if metric in grp_data.columns:
-                            avg = grp_data[metric].mean()
-                            row[metric[:15]] = f"{int(avg):,}".replace(",", ".")
+                        # Temel sayılar
+                        count = len(clust_data)
+                        n_stores = clust_data[magaza_col].nunique() if magaza_col and magaza_col in clust_data.columns else 0
 
-                    # Weighted score
-                    if '_weighted_score_cat' in grp_data.columns:
-                        ws = grp_data['_weighted_score_cat'].mean()
-                        row['W.Score'] = f"{ws:.3f}"
+                        # Detay bilgisi
+                        detay = clust_data['Cluster_Detay'].iloc[0] if 'Cluster_Detay' in clust_data.columns else clust
 
-                    summary_rows.append(row)
+                        # Kapasite ortalaması
+                        avg_capacity = 0
+                        if kap_attrs:
+                            cap_col = kap_attrs[0]
+                            if cap_col in clust_data.columns:
+                                avg_capacity = clust_data[cap_col].mean()
 
-                if summary_rows:
-                    summary_df = pd.DataFrame(summary_rows)
-                    st.dataframe(summary_df, hide_index=True, use_container_width=True)
+                        # Metrik ortalamaları
+                        metric_avgs = {}
+                        for metric in metrics[:4]:
+                            if metric in clust_data.columns:
+                                metric_avgs[metric] = clust_data[metric].mean()
+
+                        # Weighted Score ortalaması ve varyansı
+                        ws_mean = clust_data['_weighted_score_cat'].mean() if '_weighted_score_cat' in clust_data.columns else 0
+                        ws_var = clust_data['_weighted_score_cat'].var() if '_weighted_score_cat' in clust_data.columns else 0
+
+                        cluster_means[clust] = ws_mean
+                        cluster_vars[clust] = ws_var
+
+                        # Grup içi varyans
+                        within_var = ws_var if not pd.isna(ws_var) else 0
+
+                        row = {
+                            'Cluster': detay,
+                            'Count': count,
+                            'Mağaza': n_stores,
+                            'Kapasite': avg_capacity,
+                        }
+
+                        # Metrikleri ekle
+                        for metric in metrics[:3]:
+                            if metric in metric_avgs:
+                                row[metric[:12]] = metric_avgs[metric]
+
+                        row['W.Score'] = ws_mean
+                        row['Grup İçi Var.'] = within_var
+
+                        stats_rows.append(row)
+
+                    if stats_rows:
+                        stats_df = pd.DataFrame(stats_rows)
+
+                        # Gruplar arası varyans hesapla
+                        if cluster_means:
+                            between_var = np.var(list(cluster_means.values()))
+                        else:
+                            between_var = 0
+
+                        # Küme güvenilirliği hesapla
+                        avg_within_var = stats_df['Grup İçi Var.'].mean() if len(stats_df) > 0 else 0
+
+                        stats_df['Gruplar Arası Var.'] = between_var
+
+                        # Güvenilirlik hesapla
+                        def calc_cluster_reliability(row):
+                            within = row['Grup İçi Var.'] if not pd.isna(row['Grup İçi Var.']) else 0
+                            if (between_var + within) > 0:
+                                return (between_var / (between_var + within)) * 100
+                            return 50.0
+
+                        stats_df['Güvenilirlik %'] = stats_df.apply(calc_cluster_reliability, axis=1)
+
+                        # Formatla
+                        display_df = stats_df.copy()
+                        display_df['Count'] = display_df['Count'].apply(lambda x: f"{int(x):,}".replace(",", "."))
+                        display_df['Mağaza'] = display_df['Mağaza'].apply(lambda x: f"{int(x):,}".replace(",", "."))
+                        display_df['Kapasite'] = display_df['Kapasite'].apply(lambda x: f"{x:,.1f}".replace(",", "."))
+
+                        for metric in metrics[:3]:
+                            col_name = metric[:12]
+                            if col_name in display_df.columns:
+                                display_df[col_name] = display_df[col_name].apply(lambda x: f"{x:,.0f}".replace(",", "."))
+
+                        display_df['W.Score'] = display_df['W.Score'].apply(lambda x: f"{x:.3f}")
+                        display_df['Grup İçi Var.'] = display_df['Grup İçi Var.'].apply(lambda x: f"{x:.4f}")
+                        display_df['Gruplar Arası Var.'] = display_df['Gruplar Arası Var.'].apply(lambda x: f"{x:.4f}")
+                        display_df['Güvenilirlik %'] = display_df['Güvenilirlik %'].apply(lambda x: f"{x:.1f}%")
+
+                        st.dataframe(display_df, hide_index=True, use_container_width=True)
+
+                        # Özet metrikler
+                        if (between_var + avg_within_var) > 0:
+                            reliability = (between_var / (between_var + avg_within_var)) * 100
+                        else:
+                            reliability = 50.0
+
+                        col_s1, col_s2, col_s3 = st.columns(3)
+                        col_s1.metric("Ortalama Grup İçi Varyans", f"{avg_within_var:.4f}")
+                        col_s2.metric("Gruplar Arası Varyans", f"{between_var:.4f}")
+                        col_s3.metric("Genel Küme Güvenilirliği", f"{reliability:.1f}%")
+
+                        # Güvenilirlik açıklaması
+                        if reliability >= 70:
+                            st.success(f"✅ Kümeleme kalitesi YÜKSEK - Clusterlar birbirinden iyi ayrılmış")
+                        elif reliability >= 50:
+                            st.warning(f"⚠️ Kümeleme kalitesi ORTA - Bazı clusterlar örtüşüyor olabilir")
+                        else:
+                            st.error(f"❌ Kümeleme kalitesi DÜŞÜK - Clusterlar yeterince ayrışmamış")
 
                 # 3D Scatter (eğer kapasite kolonu varsa)
-                kap_attrs = cfg.get('kap_attrs', [])
-                if kap_attrs and len(kap_attrs) > 0 and 'Cluster_Kod' in filtered.columns:
+                kap_attrs_3d = cfg.get('kap_attrs', [])
+                if kap_attrs_3d and len(kap_attrs_3d) > 0 and 'Cluster_Detay' in filtered.columns:
                     st.markdown("<hr>", unsafe_allow_html=True)
                     st.markdown("**🎯 3D Scatter**")
 
-                    kap_col = kap_attrs[0]
+                    kap_col = kap_attrs_3d[0]
                     metric_col = metrics[0] if metrics else None
 
                     if metric_col and kap_col in filtered.columns and metric_col in filtered.columns:
@@ -852,7 +960,7 @@ def main():
                             x=kap_col,
                             y=metric_col,
                             z='_weighted_score_cat' if '_weighted_score_cat' in sample_df.columns else metric_col,
-                            color='Cluster_Kod',
+                            color='Cluster_Detay',
                             color_discrete_map=color_map,
                             opacity=0.7,
                             height=450
@@ -1105,24 +1213,30 @@ def main():
                     if len(filtered) < len(results):
                         st.caption(f"📊 Filtrelenmiş: {len(filtered):,} / {len(results):,} satır ({100*len(filtered)/len(results):.1f}%)")
 
-                # Dağılım
-                if cluster_col and cluster_col in filtered.columns:
+                # Dağılım - Açık isimlerle
+                detail_col = "CO_PilotCluster_Detay"
+                if detail_col in filtered.columns:
                     st.markdown("<hr>", unsafe_allow_html=True)
-                    counts = filtered[cluster_col].value_counts().reset_index()
+                    counts = filtered[detail_col].value_counts().reset_index()
                     counts.columns = ['Cluster', 'Count']
 
-                    order = ['TOP1', 'TOP2', 'TOP3', 'MID4', 'MID5', 'MID6', 'ALL7', 'ALL8', 'ALL9']
+                    # Sıralama (açık isimlerle)
+                    order = ['TOP1-Büyük-Hızlı', 'TOP2-Orta-Hızlı', 'TOP3-Büyük-Orta',
+                             'MID4-Küçük-Hızlı', 'MID5-Orta-Orta', 'MID6-Küçük-Orta',
+                             'ALL7-Büyük-Yavaş', 'ALL8-Orta-Yavaş', 'ALL9-Küçük-Yavaş']
                     counts['sort'] = counts['Cluster'].apply(lambda x: order.index(x) if x in order else 99)
                     counts = counts.sort_values('sort').drop('sort', axis=1)
 
+                    # Renk haritası (açık isimlerle)
                     color_map = {
-                        'TOP1': '#006100', 'TOP2': '#38761d', 'TOP3': '#6aa84f',
-                        'MID4': '#9C5700', 'MID5': '#b8860b', 'MID6': '#daa520',
-                        'ALL7': '#9C0006', 'ALL8': '#cc0000', 'ALL9': '#ea9999',
+                        'TOP1-Büyük-Hızlı': '#006100', 'TOP2-Orta-Hızlı': '#38761d', 'TOP3-Büyük-Orta': '#6aa84f',
+                        'MID4-Küçük-Hızlı': '#9C5700', 'MID5-Orta-Orta': '#b8860b', 'MID6-Küçük-Orta': '#daa520',
+                        'ALL7-Büyük-Yavaş': '#9C0006', 'ALL8-Orta-Yavaş': '#cc0000', 'ALL9-Küçük-Yavaş': '#ea9999',
                     }
 
                     fig = px.bar(counts, x='Cluster', y='Count', color='Cluster', color_discrete_map=color_map, height=300)
                     fig.update_layout(showlegend=False)
+                    fig.update_xaxes(tickangle=45)
                     st.plotly_chart(fig, use_container_width=True)
 
                 # ═══════════════════════════════════════════════════════════════════════════
@@ -1138,23 +1252,22 @@ def main():
                 col_i = cfg.get('col_i')  # Kapasite
                 col_j = cfg.get('col_j')  # Fiyat
 
-                if cluster_col and cluster_col in filtered.columns:
+                if detail_col in filtered.columns:
                     # Mağaza kolonu bul (ilk key genellikle store/mağaza)
                     store_col = keys[0] if keys else None
 
-                    # Cluster bazında istatistikler
+                    # Cluster bazında istatistikler (açık isimlerle)
                     stats_rows = []
-                    cluster_order = ['TOP1', 'TOP2', 'TOP3', 'MID4', 'MID5', 'MID6', 'ALL7', 'ALL8', 'ALL9']
-
-                    # Global ortalama ve varyans (gruplar arası hesaplama için)
-                    global_mean_score = filtered['Weighted_Score'].mean() if 'Weighted_Score' in filtered.columns else 0
+                    cluster_order = ['TOP1-Büyük-Hızlı', 'TOP2-Orta-Hızlı', 'TOP3-Büyük-Orta',
+                                     'MID4-Küçük-Hızlı', 'MID5-Orta-Orta', 'MID6-Küçük-Orta',
+                                     'ALL7-Büyük-Yavaş', 'ALL8-Orta-Yavaş', 'ALL9-Küçük-Yavaş']
 
                     # Her cluster için istatistik hesapla
                     cluster_means = {}
                     cluster_vars = {}
 
                     for clust in cluster_order:
-                        clust_data = filtered[filtered[cluster_col] == clust]
+                        clust_data = filtered[filtered[detail_col] == clust]
                         if len(clust_data) == 0:
                             continue
 
