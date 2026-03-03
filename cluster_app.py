@@ -23,22 +23,36 @@ st.set_page_config(page_title="Cluster Analizi", page_icon="📊", layout="wide"
 # ORTAK SABİTLER & CSS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# CoPilot V3 Sabitleri
+# CoPilot V3 Sabitleri - Yeni İsimlendirme
+# TOP = Hızlı performans, MID = Orta performans, ALL = Yavaş performans
 COPILOT_RANK_TO_CODE = {
     1: "TOP1", 2: "TOP2", 3: "TOP3",
-    4: "MID1", 5: "MID2", 6: "MID3",
-    7: "ALL1", 8: "ALL2", 9: "ALL3",
+    4: "MID4", 5: "MID5", 6: "MID6",
+    7: "ALL7", 8: "ALL8", 9: "ALL9",
 }
 COPILOT_CODE_TO_RANK = {v: k for k, v in COPILOT_RANK_TO_CODE.items()}
 COPILOT_RANK_TO_PAIR = {
-    1: ("Büyük", "Hızlı"), 2: ("Büyük", "Orta"), 3: ("Büyük", "Yavaş"),
-    4: ("Orta", "Hızlı"),  5: ("Orta", "Orta"),  6: ("Orta", "Yavaş"),
-    7: ("Küçük", "Hızlı"), 8: ("Küçük", "Orta"), 9: ("Küçük", "Yavaş"),
+    1: ("Büyük", "Hızlı"),  2: ("Orta", "Hızlı"),  3: ("Büyük", "Orta"),
+    4: ("Küçük", "Hızlı"),  5: ("Orta", "Orta"),   6: ("Küçük", "Orta"),
+    7: ("Büyük", "Yavaş"),  8: ("Orta", "Yavaş"),  9: ("Küçük", "Yavaş"),
 }
 COPILOT_KEY_TO_DETAIL = {
-    "BüyükHızlı": "TOP1-Büyük-Hızlı", "BüyükOrta": "TOP2-Büyük-Orta", "BüyükYavaş": "TOP3-Büyük-Yavaş",
-    "OrtaHızlı": "MID1-Orta-Hızlı",   "OrtaOrta": "MID2-Orta-Orta",   "OrtaYavaş": "MID3-Orta-Yavaş",
-    "KüçükHızlı": "ALL1-Küçük-Hızlı", "KüçükOrta": "ALL2-Küçük-Orta", "KüçükYavaş": "ALL3-Küçük-Yavaş",
+    "BüyükHızlı": "TOP1-Büyük-Hızlı", "OrtaHızlı": "TOP2-Orta-Hızlı",   "BüyükOrta": "TOP3-Büyük-Orta",
+    "KüçükHızlı": "MID4-Küçük-Hızlı", "OrtaOrta": "MID5-Orta-Orta",     "KüçükOrta": "MID6-Küçük-Orta",
+    "BüyükYavaş": "ALL7-Büyük-Yavaş", "OrtaYavaş": "ALL8-Orta-Yavaş",   "KüçükYavaş": "ALL9-Küçük-Yavaş",
+}
+
+# Thorius Sabitleri - Yeni İsimlendirme (Kapasite-Performans → Kod)
+# Kapasite: 1=Büyük, 2=Orta, 3=Küçük | Performans: 1=Hızlı, 2=Orta, 3=Yavaş
+THORIUS_KOMBINE_TO_CODE = {
+    "1-1": "TOP1-Büyük-Hızlı",  "2-1": "TOP2-Orta-Hızlı",  "1-2": "TOP3-Büyük-Orta",
+    "3-1": "MID4-Küçük-Hızlı",  "2-2": "MID5-Orta-Orta",   "3-2": "MID6-Küçük-Orta",
+    "1-3": "ALL7-Büyük-Yavaş",  "2-3": "ALL8-Orta-Yavaş",  "3-3": "ALL9-Küçük-Yavaş",
+}
+THORIUS_KOMBINE_TO_SHORT = {
+    "1-1": "TOP1", "2-1": "TOP2", "1-2": "TOP3",
+    "3-1": "MID4", "2-2": "MID5", "3-2": "MID6",
+    "1-3": "ALL7", "2-3": "ALL8", "3-3": "ALL9",
 }
 
 st.markdown("""
@@ -374,13 +388,14 @@ def copilot_kmeans_per_group(data, weighted, price_sc, cap_sc, keys, perf_w=0.7,
 
 
 def copilot_assign_cluster_code(cap, perf):
-    """Kapasite + Performans → Cluster Code"""
+    """Kapasite + Performans → Cluster Code (Yeni İsimlendirme)"""
     concat_key = (cap.astype(str) + perf.astype(str)).replace("nannan", "")
 
+    # Yeni mapping: TOP=Hızlı, MID=Orta performans, ALL=Yavaş
     pair_to_code = {
-        ("Büyük", "Hızlı"): "TOP1", ("Büyük", "Orta"): "TOP2", ("Büyük", "Yavaş"): "TOP3",
-        ("Orta", "Hızlı"): "MID1",  ("Orta", "Orta"): "MID2",  ("Orta", "Yavaş"): "MID3",
-        ("Küçük", "Hızlı"): "ALL1", ("Küçük", "Orta"): "ALL2", ("Küçük", "Yavaş"): "ALL3",
+        ("Büyük", "Hızlı"): "TOP1", ("Orta", "Hızlı"): "TOP2",  ("Büyük", "Orta"): "TOP3",
+        ("Küçük", "Hızlı"): "MID4", ("Orta", "Orta"): "MID5",   ("Küçük", "Orta"): "MID6",
+        ("Büyük", "Yavaş"): "ALL7", ("Orta", "Yavaş"): "ALL8",  ("Küçük", "Yavaş"): "ALL9",
     }
 
     code = pd.Series([pair_to_code.get((c, p), np.nan) for c, p in zip(cap, perf)], index=cap.index)
@@ -680,6 +695,10 @@ def main():
                                 result['Urun_Grubu'] = result['Urun_Grubu_Kat'].fillna(1).astype(int)
                                 result['Kombine_Grup'] = result['Kapasite_Grubu'].astype(str) + '-' + result['Urun_Grubu'].astype(str)
 
+                                # Yeni isimlendirme kolonları ekle
+                                result['Cluster_Kod'] = result['Kombine_Grup'].map(THORIUS_KOMBINE_TO_SHORT).fillna(result['Kombine_Grup'])
+                                result['Cluster_Detay'] = result['Kombine_Grup'].map(THORIUS_KOMBINE_TO_CODE).fillna(result['Kombine_Grup'])
+
                                 st.session_state.results = result
                                 st.session_state.config = {
                                     'magaza_col': magaza_col,
@@ -705,10 +724,12 @@ def main():
                 # Legend
                 st.markdown("""
                 <div class="legend-box">
-                    <b>Kombine Grup Formatı → X-Y</b><br>
-                    <b>X (Kapasite):</b> 1=Büyük, 2=Orta, 3=Küçük<br>
-                    <b>Y (Performans):</b> 1=Yüksek, 2=Orta, 3=Düşük<br>
-                    <b>Örnek:</b> 1-1 = Büyük mağaza + Yüksek performans (TOP)
+                    <span class="badge-top">TOP1-3</span> Hızlı Performans |
+                    <span class="badge-mid">MID4-6</span> Orta Performans |
+                    <span class="badge-all">ALL7-9</span> Yavaş Performans<br>
+                    <b>Detay:</b> TOP1=Büyük-Hızlı, TOP2=Orta-Hızlı, TOP3=Büyük-Orta |
+                    MID4=Küçük-Hızlı, MID5=Orta-Orta, MID6=Küçük-Orta |
+                    ALL7=Büyük-Yavaş, ALL8=Orta-Yavaş, ALL9=Küçük-Yavaş
                 </div>
                 """, unsafe_allow_html=True)
 
@@ -729,49 +750,67 @@ def main():
                 else:
                     c3.metric("Kategori", "-")
 
-                if 'Kombine_Grup' in results.columns:
-                    c4.metric("Kombine Grup", f"{results['Kombine_Grup'].nunique()}")
+                if 'Cluster_Kod' in results.columns:
+                    c4.metric("Cluster", f"{results['Cluster_Kod'].nunique()}")
                 else:
-                    c4.metric("Kombine Grup", "-")
+                    c4.metric("Cluster", "-")
+
+                st.markdown("<hr>", unsafe_allow_html=True)
+
+                # Kategori Filtresi
+                if kategori_col and kategori_col in results.columns:
+                    kategoriler = ['🔄 Tümü'] + sorted(results[kategori_col].dropna().unique().tolist())
+                    selected_kat = st.selectbox("🏷️ Kategori Filtre", kategoriler, key='th_filter')
+
+                    if selected_kat != '🔄 Tümü':
+                        filtered = results[results[kategori_col] == selected_kat]
+                    else:
+                        filtered = results
+                else:
+                    filtered = results
 
                 st.markdown("<hr>", unsafe_allow_html=True)
 
                 # Grup Dağılımı
-                st.markdown("**📊 Kombine Grup Dağılımı**")
-                counts = results['Kombine_Grup'].value_counts().reset_index()
-                counts.columns = ['Grup', 'Count']
+                st.markdown("**📊 Cluster Dağılımı**")
+                if 'Cluster_Kod' in filtered.columns:
+                    counts = filtered['Cluster_Kod'].value_counts().reset_index()
+                    counts.columns = ['Cluster', 'Count']
 
-                # Sıralama: 1-1, 1-2, 1-3, 2-1, ...
-                order = ['1-1', '1-2', '1-3', '2-1', '2-2', '2-3', '3-1', '3-2', '3-3']
-                counts['sort'] = counts['Grup'].apply(lambda x: order.index(x) if x in order else 99)
-                counts = counts.sort_values('sort').drop('sort', axis=1)
+                    # Sıralama: TOP1, TOP2, TOP3, MID4, MID5, MID6, ALL7, ALL8, ALL9
+                    order = ['TOP1', 'TOP2', 'TOP3', 'MID4', 'MID5', 'MID6', 'ALL7', 'ALL8', 'ALL9']
+                    counts['sort'] = counts['Cluster'].apply(lambda x: order.index(x) if x in order else 99)
+                    counts = counts.sort_values('sort').drop('sort', axis=1)
 
-                # Renk haritası
-                color_map = {
-                    '1-1': '#006100', '1-2': '#38761d', '1-3': '#6aa84f',
-                    '2-1': '#9C5700', '2-2': '#b8860b', '2-3': '#daa520',
-                    '3-1': '#9C0006', '3-2': '#cc0000', '3-3': '#ea9999',
-                }
+                    # Renk haritası
+                    color_map = {
+                        'TOP1': '#006100', 'TOP2': '#38761d', 'TOP3': '#6aa84f',
+                        'MID4': '#9C5700', 'MID5': '#b8860b', 'MID6': '#daa520',
+                        'ALL7': '#9C0006', 'ALL8': '#cc0000', 'ALL9': '#ea9999',
+                    }
 
-                fig = px.bar(counts, x='Grup', y='Count', color='Grup',
-                             color_discrete_map=color_map, height=300)
-                fig.update_layout(showlegend=False, margin=dict(l=0, r=0, t=10, b=0))
-                st.plotly_chart(fig, use_container_width=True)
+                    fig = px.bar(counts, x='Cluster', y='Count', color='Cluster',
+                                 color_discrete_map=color_map, height=300)
+                    fig.update_layout(showlegend=False, margin=dict(l=0, r=0, t=10, b=0))
+                    st.plotly_chart(fig, use_container_width=True)
 
                 # Özet Tablo
                 st.markdown("<hr>", unsafe_allow_html=True)
-                st.markdown("**📋 Grup Özet Tablosu**")
+                st.markdown("**📋 Cluster Özet Tablosu**")
 
                 summary_rows = []
                 for grp in order:
-                    if 'Kombine_Grup' not in results.columns:
+                    if 'Cluster_Kod' not in filtered.columns:
                         break
-                    grp_data = results[results['Kombine_Grup'] == grp]
+                    grp_data = filtered[filtered['Cluster_Kod'] == grp]
                     if len(grp_data) == 0:
                         continue
 
+                    # Detay bilgisi al
+                    detay = grp_data['Cluster_Detay'].iloc[0] if 'Cluster_Detay' in grp_data.columns and len(grp_data) > 0 else grp
+
                     row = {
-                        'Grup': grp,
+                        'Cluster': detay,
                         'Satır': f"{len(grp_data):,}".replace(",", "."),
                     }
 
@@ -798,22 +837,22 @@ def main():
 
                 # 3D Scatter (eğer kapasite kolonu varsa)
                 kap_attrs = cfg.get('kap_attrs', [])
-                if kap_attrs and len(kap_attrs) > 0:
+                if kap_attrs and len(kap_attrs) > 0 and 'Cluster_Kod' in filtered.columns:
                     st.markdown("<hr>", unsafe_allow_html=True)
                     st.markdown("**🎯 3D Scatter**")
 
                     kap_col = kap_attrs[0]
                     metric_col = metrics[0] if metrics else None
 
-                    if metric_col and kap_col in results.columns and metric_col in results.columns:
-                        sample_df = results.sample(min(3000, len(results)))
+                    if metric_col and kap_col in filtered.columns and metric_col in filtered.columns:
+                        sample_df = filtered.sample(min(3000, len(filtered)))
 
                         fig3d = px.scatter_3d(
                             sample_df,
                             x=kap_col,
                             y=metric_col,
                             z='_weighted_score_cat' if '_weighted_score_cat' in sample_df.columns else metric_col,
-                            color='Kombine_Grup',
+                            color='Cluster_Kod',
                             color_discrete_map=color_map,
                             opacity=0.7,
                             height=450
@@ -829,13 +868,13 @@ def main():
                 with col_d1:
                     buffer = io.BytesIO()
                     results.to_excel(buffer, index=False, engine='openpyxl')
-                    st.download_button("📥 Excel İndir", buffer.getvalue(),
+                    st.download_button("📥 Excel (Tümü)", buffer.getvalue(),
                                        f"thorius_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
                                        use_container_width=True)
 
                 with col_d2:
-                    csv = results.to_csv(index=False).encode('utf-8-sig')
-                    st.download_button("📥 CSV İndir", csv,
+                    csv = filtered.to_csv(index=False).encode('utf-8-sig')
+                    st.download_button("📥 CSV (Filtreli)", csv,
                                        f"thorius_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
                                        use_container_width=True)
 
@@ -846,7 +885,7 @@ def main():
                         show_cols.append(magaza_col)
                     if kategori_col:
                         show_cols.append(kategori_col)
-                    show_cols += ['Kapasite_Grubu', 'Urun_Grubu', 'Kombine_Grup']
+                    show_cols += ['Cluster_Kod', 'Cluster_Detay', 'Kapasite_Grubu', 'Urun_Grubu']
                     show_cols += cfg.get('metrics', [])[:3]
                     show_cols = [c for c in show_cols if c in results.columns]
                     if show_cols:
@@ -858,13 +897,13 @@ def main():
                 st.info("👈 Sol panelden veri yükleyip hesaplayın")
 
                 # Demo
-                st.markdown("**📊 Demo — Örnek Grup Dağılımı**")
+                st.markdown("**📊 Demo — Örnek Cluster Dağılımı**")
                 demo = pd.DataFrame({
-                    'Grup': ['1-1', '1-2', '1-3', '2-1', '2-2', '2-3', '3-1', '3-2', '3-3'],
+                    'Cluster': ['TOP1', 'TOP2', 'TOP3', 'MID4', 'MID5', 'MID6', 'ALL7', 'ALL8', 'ALL9'],
                     'Count': [120, 150, 100, 180, 220, 160, 250, 300, 220]
                 })
-                fig = px.bar(demo, x='Grup', y='Count',
-                             color='Grup',
+                fig = px.bar(demo, x='Cluster', y='Count',
+                             color='Cluster',
                              color_discrete_sequence=['#006100', '#38761d', '#6aa84f',
                                                       '#9C5700', '#b8860b', '#daa520',
                                                       '#9C0006', '#cc0000', '#ea9999'],
@@ -968,7 +1007,15 @@ def main():
 
                             st.session_state.results = data
                             st.session_state.move_log = move_log
-                            st.session_state.config = {'keys': keys, 'enable_min10': enable_min10}
+                            st.session_state.config = {
+                                'keys': keys,
+                                'enable_min10': enable_min10,
+                                'col_e': col_e,  # Satış Adet
+                                'col_f': col_f,  # Ciro
+                                'col_g': col_g,  # Brüt Kar
+                                'col_i': col_i,  # Kapasite
+                                'col_j': col_j,  # Fiyat
+                            }
                             st.success("✅ Tamamlandı!")
                         except Exception as e:
                             st.error(f"❌ {e}")
@@ -993,9 +1040,12 @@ def main():
                 # Legend
                 st.markdown("""
                 <div class="legend-box">
-                    <span class="badge-top">TOP1-3</span> Büyük Mağaza |
-                    <span class="badge-mid">MID1-3</span> Orta Mağaza |
-                    <span class="badge-all">ALL1-3</span> Küçük Mağaza
+                    <span class="badge-top">TOP1-3</span> Hızlı Performans |
+                    <span class="badge-mid">MID4-6</span> Orta Performans |
+                    <span class="badge-all">ALL7-9</span> Yavaş Performans<br>
+                    <b>Detay:</b> TOP1=Büyük-Hızlı, TOP2=Orta-Hızlı, TOP3=Büyük-Orta |
+                    MID4=Küçük-Hızlı, MID5=Orta-Orta, MID6=Küçük-Orta |
+                    ALL7=Büyük-Yavaş, ALL8=Orta-Yavaş, ALL9=Küçük-Yavaş
                 </div>
                 """, unsafe_allow_html=True)
 
@@ -1014,37 +1064,225 @@ def main():
                 else:
                     c3.metric("Cluster", "-")
 
+                # Filtreler
+                st.markdown("<hr>", unsafe_allow_html=True)
+                st.markdown('<div class="section-header-orange">🔍 Filtreler</div>', unsafe_allow_html=True)
+                keys = cfg.get('keys', [])
+
+                filtered = results.copy()
+
+                # Filtre seçenekleri - 3 kolon halinde
+                if keys and len(keys) >= 3:
+                    col_f1, col_f2, col_f3 = st.columns(3)
+
+                    with col_f1:
+                        # LivingArea filtresi
+                        living_col = keys[0]
+                        living_opts = ['🔄 Tümü'] + sorted(results[living_col].dropna().unique().tolist())
+                        selected_living = st.selectbox(f"🏠 {living_col}", living_opts, key='cp_filter_living')
+
+                    with col_f2:
+                        # MainGroup filtresi
+                        main_col = keys[1]
+                        main_opts = ['🔄 Tümü'] + sorted(results[main_col].dropna().unique().tolist())
+                        selected_main = st.selectbox(f"📦 {main_col}", main_opts, key='cp_filter_main')
+
+                    with col_f3:
+                        # SubGroup filtresi
+                        sub_col = keys[2]
+                        sub_opts = ['🔄 Tümü'] + sorted(results[sub_col].dropna().unique().tolist())
+                        selected_sub = st.selectbox(f"🏷️ {sub_col}", sub_opts, key='cp_filter_sub')
+
+                    # Filtreleri uygula
+                    if selected_living != '🔄 Tümü':
+                        filtered = filtered[filtered[living_col] == selected_living]
+                    if selected_main != '🔄 Tümü':
+                        filtered = filtered[filtered[main_col] == selected_main]
+                    if selected_sub != '🔄 Tümü':
+                        filtered = filtered[filtered[sub_col] == selected_sub]
+
+                    # Filtre sonucu bilgisi
+                    if len(filtered) < len(results):
+                        st.caption(f"📊 Filtrelenmiş: {len(filtered):,} / {len(results):,} satır ({100*len(filtered)/len(results):.1f}%)")
+
                 # Dağılım
-                if cluster_col and cluster_col in results.columns:
+                if cluster_col and cluster_col in filtered.columns:
                     st.markdown("<hr>", unsafe_allow_html=True)
-                    counts = results[cluster_col].value_counts().reset_index()
+                    counts = filtered[cluster_col].value_counts().reset_index()
                     counts.columns = ['Cluster', 'Count']
 
-                    order = ['TOP1', 'TOP2', 'TOP3', 'MID1', 'MID2', 'MID3', 'ALL1', 'ALL2', 'ALL3']
+                    order = ['TOP1', 'TOP2', 'TOP3', 'MID4', 'MID5', 'MID6', 'ALL7', 'ALL8', 'ALL9']
                     counts['sort'] = counts['Cluster'].apply(lambda x: order.index(x) if x in order else 99)
                     counts = counts.sort_values('sort').drop('sort', axis=1)
 
                     color_map = {
                         'TOP1': '#006100', 'TOP2': '#38761d', 'TOP3': '#6aa84f',
-                        'MID1': '#9C5700', 'MID2': '#b8860b', 'MID3': '#daa520',
-                        'ALL1': '#9C0006', 'ALL2': '#cc0000', 'ALL3': '#ea9999',
+                        'MID4': '#9C5700', 'MID5': '#b8860b', 'MID6': '#daa520',
+                        'ALL7': '#9C0006', 'ALL8': '#cc0000', 'ALL9': '#ea9999',
                     }
 
                     fig = px.bar(counts, x='Cluster', y='Count', color='Cluster', color_discrete_map=color_map, height=300)
                     fig.update_layout(showlegend=False)
                     st.plotly_chart(fig, use_container_width=True)
 
+                # ═══════════════════════════════════════════════════════════════════════════
+                # DETAYLI İSTATİSTİK TABLOSU
+                # ═══════════════════════════════════════════════════════════════════════════
+                st.markdown("<hr>", unsafe_allow_html=True)
+                st.markdown('<div class="section-header-green">📊 Detaylı Cluster İstatistikleri</div>', unsafe_allow_html=True)
+
+                # Metrik kolonlarını al
+                col_e = cfg.get('col_e')  # Satış Adet
+                col_f = cfg.get('col_f')  # Ciro
+                col_g = cfg.get('col_g')  # Brüt Kar
+                col_i = cfg.get('col_i')  # Kapasite
+                col_j = cfg.get('col_j')  # Fiyat
+
+                if cluster_col and cluster_col in filtered.columns:
+                    # Mağaza kolonu bul (ilk key genellikle store/mağaza)
+                    store_col = keys[0] if keys else None
+
+                    # Cluster bazında istatistikler
+                    stats_rows = []
+                    cluster_order = ['TOP1', 'TOP2', 'TOP3', 'MID4', 'MID5', 'MID6', 'ALL7', 'ALL8', 'ALL9']
+
+                    # Global ortalama ve varyans (gruplar arası hesaplama için)
+                    global_mean_score = filtered['Weighted_Score'].mean() if 'Weighted_Score' in filtered.columns else 0
+
+                    # Her cluster için istatistik hesapla
+                    cluster_means = {}
+                    cluster_vars = {}
+
+                    for clust in cluster_order:
+                        clust_data = filtered[filtered[cluster_col] == clust]
+                        if len(clust_data) == 0:
+                            continue
+
+                        # Temel sayılar
+                        count = len(clust_data)
+                        n_stores = clust_data[store_col].nunique() if store_col and store_col in clust_data.columns else 0
+
+                        # Ortalamalar
+                        avg_capacity = clust_data[col_i].mean() if col_i and col_i in clust_data.columns else 0
+                        avg_unit = clust_data[col_e].mean() if col_e and col_e in clust_data.columns else 0
+                        avg_revenue = clust_data[col_f].mean() if col_f and col_f in clust_data.columns else 0
+                        avg_profit = clust_data[col_g].mean() if col_g and col_g in clust_data.columns else 0
+                        avg_price = clust_data[col_j].mean() if col_j and col_j in clust_data.columns else 0
+
+                        # Weighted Score ortalaması ve varyansı
+                        ws_mean = clust_data['Weighted_Score'].mean() if 'Weighted_Score' in clust_data.columns else 0
+                        ws_var = clust_data['Weighted_Score'].var() if 'Weighted_Score' in clust_data.columns else 0
+
+                        cluster_means[clust] = ws_mean
+                        cluster_vars[clust] = ws_var
+
+                        # Grup içi varyans (within-cluster variance)
+                        within_var = ws_var if not pd.isna(ws_var) else 0
+
+                        stats_rows.append({
+                            'Cluster': clust,
+                            'Count': count,
+                            'Mağaza': n_stores,
+                            'Kapasite': avg_capacity,
+                            'Satış Adet': avg_unit,
+                            'Ciro': avg_revenue,
+                            'Brüt Kar': avg_profit,
+                            'Fiyat': avg_price,
+                            'Grup İçi Var.': within_var,
+                        })
+
+                    if stats_rows:
+                        stats_df = pd.DataFrame(stats_rows)
+
+                        # Gruplar arası varyans hesapla (between-cluster variance)
+                        if cluster_means:
+                            overall_mean = np.mean(list(cluster_means.values()))
+                            between_var = np.var(list(cluster_means.values()))
+                        else:
+                            between_var = 0
+
+                        # Küme güvenilirliği hesapla
+                        # Silhouette-benzeri metrik: between_var / (between_var + avg_within_var)
+                        avg_within_var = stats_df['Grup İçi Var.'].mean() if len(stats_df) > 0 else 0
+
+                        stats_df['Gruplar Arası Var.'] = between_var
+
+                        # Güvenilirlik: Yüksek between_var ve düşük within_var = iyi ayrım
+                        if (between_var + avg_within_var) > 0:
+                            reliability = (between_var / (between_var + avg_within_var)) * 100
+                        else:
+                            reliability = 50.0
+
+                        # Her cluster için bireysel güvenilirlik
+                        def calc_cluster_reliability(row):
+                            within = row['Grup İçi Var.'] if not pd.isna(row['Grup İçi Var.']) else 0
+                            if (between_var + within) > 0:
+                                return (between_var / (between_var + within)) * 100
+                            return 50.0
+
+                        stats_df['Güvenilirlik %'] = stats_df.apply(calc_cluster_reliability, axis=1)
+
+                        # Formatla
+                        display_df = stats_df.copy()
+                        display_df['Count'] = display_df['Count'].apply(lambda x: f"{int(x):,}".replace(",", "."))
+                        display_df['Mağaza'] = display_df['Mağaza'].apply(lambda x: f"{int(x):,}".replace(",", "."))
+                        display_df['Kapasite'] = display_df['Kapasite'].apply(lambda x: f"{x:,.1f}".replace(",", "."))
+                        display_df['Satış Adet'] = display_df['Satış Adet'].apply(lambda x: f"{x:,.1f}".replace(",", "."))
+                        display_df['Ciro'] = display_df['Ciro'].apply(lambda x: f"{x:,.0f}".replace(",", "."))
+                        display_df['Brüt Kar'] = display_df['Brüt Kar'].apply(lambda x: f"{x:,.0f}".replace(",", "."))
+                        display_df['Fiyat'] = display_df['Fiyat'].apply(lambda x: f"{x:,.2f}".replace(",", "."))
+                        display_df['Grup İçi Var.'] = display_df['Grup İçi Var.'].apply(lambda x: f"{x:.4f}")
+                        display_df['Gruplar Arası Var.'] = display_df['Gruplar Arası Var.'].apply(lambda x: f"{x:.4f}")
+                        display_df['Güvenilirlik %'] = display_df['Güvenilirlik %'].apply(lambda x: f"{x:.1f}%")
+
+                        st.dataframe(display_df, hide_index=True, use_container_width=True)
+
+                        # Özet metrikler
+                        col_s1, col_s2, col_s3 = st.columns(3)
+                        col_s1.metric("Ortalama Grup İçi Varyans", f"{avg_within_var:.4f}")
+                        col_s2.metric("Gruplar Arası Varyans", f"{between_var:.4f}")
+                        col_s3.metric("Genel Küme Güvenilirliği", f"{reliability:.1f}%")
+
+                        # Güvenilirlik açıklaması
+                        if reliability >= 70:
+                            st.success(f"✅ Kümeleme kalitesi YÜKSEK - Clusterlar birbirinden iyi ayrılmış")
+                        elif reliability >= 50:
+                            st.warning(f"⚠️ Kümeleme kalitesi ORTA - Bazı clusterlar örtüşüyor olabilir")
+                        else:
+                            st.error(f"❌ Kümeleme kalitesi DÜŞÜK - Clusterlar yeterince ayrışmamış")
+
                 # İndir
                 st.markdown("<hr>", unsafe_allow_html=True)
-                buffer = io.BytesIO()
-                with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-                    results.to_excel(writer, index=False, sheet_name='CoPilot_V3')
-                    if st.session_state.move_log is not None and len(st.session_state.move_log) > 0:
-                        st.session_state.move_log.to_excel(writer, index=False, sheet_name='Min10_Log')
+                col_d1, col_d2 = st.columns(2)
 
-                st.download_button("📥 Excel İndir", buffer.getvalue(),
-                                   f"copilot_v3_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
-                                   use_container_width=True)
+                with col_d1:
+                    buffer = io.BytesIO()
+                    with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                        results.to_excel(writer, index=False, sheet_name='CoPilot_V3')
+                        if st.session_state.move_log is not None and len(st.session_state.move_log) > 0:
+                            st.session_state.move_log.to_excel(writer, index=False, sheet_name='Min10_Log')
+
+                    st.download_button("📥 Excel İndir", buffer.getvalue(),
+                                       f"copilot_v3_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+                                       use_container_width=True)
+
+                with col_d2:
+                    csv = filtered.to_csv(index=False).encode('utf-8-sig')
+                    st.download_button("📥 CSV İndir", csv,
+                                       f"copilot_v3_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+                                       use_container_width=True)
+
+                # Detaylı Tablo
+                with st.expander("📋 Tüm Veriyi Göster", expanded=False):
+                    show_cols = keys.copy() if keys else []
+                    show_cols += ['PerformansGrade', 'KapasiteCluster', cluster_col]
+                    if 'Weighted_Score' in filtered.columns:
+                        show_cols.append('Weighted_Score')
+                    show_cols = [c for c in show_cols if c in filtered.columns]
+                    if show_cols:
+                        st.dataframe(filtered[show_cols], height=400, use_container_width=True)
+                    else:
+                        st.dataframe(filtered, height=400, use_container_width=True)
             else:
                 st.info("👈 Sol panelden veri yükleyip hesaplayın")
 
