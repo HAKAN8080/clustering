@@ -405,7 +405,7 @@ def copilot_assign_cluster_code(cap, perf):
 
 
 def copilot_min10_balancing(df, keys, score_col="_order_comp", cap_sc_col="Capacity_sc", min_per_rank=10):
-    """Min-10 Balancing"""
+    """Min-10 Balancing - Dinamik minimum ile"""
     base_rank = df["CO_PilotCluster"].map(lambda c: COPILOT_CODE_TO_RANK.get(c, np.nan))
 
     score_med = df[score_col].median() if df[score_col].notna().any() else 0
@@ -419,8 +419,13 @@ def copilot_min10_balancing(df, keys, score_col="_order_comp", cap_sc_col="Capac
         idx = grp.index
         n = len(idx)
 
-        if n < min_per_rank * 9:
+        # Dinamik minimum: grup boyutuna göre ayarla
+        # En az 9 eleman olmalı (her cluster için 1)
+        if n < 9:
             continue
+
+        # Dinamik min_per_rank: grup boyutu / 9, ama en fazla istenen min_per_rank
+        dynamic_min = min(min_per_rank, max(1, n // 9))
 
         ranks = adj_rank.loc[idx].copy()
         scores = combined_score.loc[idx].copy()
@@ -432,16 +437,16 @@ def copilot_min10_balancing(df, keys, score_col="_order_comp", cap_sc_col="Capac
             iteration += 1
             counts = ranks.value_counts()
 
-            deficits = {r: min_per_rank - int(counts.get(r, 0))
+            deficits = {r: dynamic_min - int(counts.get(r, 0))
                         for r in range(1, 10)
-                        if int(counts.get(r, 0)) < min_per_rank}
+                        if int(counts.get(r, 0)) < dynamic_min}
 
             if not deficits:
                 break
 
-            donors = {r: int(counts.get(r, 0)) - min_per_rank
+            donors = {r: int(counts.get(r, 0)) - dynamic_min
                       for r in range(1, 10)
-                      if int(counts.get(r, 0)) > min_per_rank}
+                      if int(counts.get(r, 0)) > dynamic_min}
 
             if not donors:
                 break
@@ -469,7 +474,9 @@ def copilot_min10_balancing(df, keys, score_col="_order_comp", cap_sc_col="Capac
                 "Group": str(gk),
                 "from_rank": r_donor,
                 "to_rank": r_target,
-                "moved_count": len(pick)
+                "moved_count": len(pick),
+                "dynamic_min": dynamic_min,
+                "group_size": n
             })
 
         adj_rank.loc[idx] = ranks
@@ -1052,6 +1059,7 @@ def main():
                     matches = [i for i, c in enumerate(cols) if name.lower() in c.lower()]
                     return matches[0] if matches else 0
 
+                col_store = st.selectbox("🏪 Mağaza Kolonu", all_cols, index=find_idx("store", all_cols), key='cp_store')
                 col_living = st.selectbox("LivingArea", all_cols, index=find_idx("living", all_cols), key='cp_living')
                 col_main = st.selectbox("MainGroupDesc", all_cols, index=find_idx("maingroup", all_cols), key='cp_main')
                 col_sub = st.selectbox("SubGroupDesc", all_cols, index=find_idx("subgroup", all_cols), key='cp_sub')
@@ -1118,6 +1126,7 @@ def main():
                             st.session_state.config = {
                                 'keys': keys,
                                 'enable_min10': enable_min10,
+                                'col_store': col_store,  # Mağaza
                                 'col_e': col_e,  # Satış Adet
                                 'col_f': col_f,  # Ciro
                                 'col_g': col_g,  # Brüt Kar
@@ -1253,8 +1262,8 @@ def main():
                 col_j = cfg.get('col_j')  # Fiyat
 
                 if detail_col in filtered.columns:
-                    # Mağaza kolonu bul (ilk key genellikle store/mağaza)
-                    store_col = keys[0] if keys else None
+                    # Mağaza kolonu
+                    store_col = cfg.get('col_store')
 
                     # Cluster bazında istatistikler (açık isimlerle)
                     stats_rows = []
@@ -1363,6 +1372,28 @@ def main():
                             st.warning(f"⚠️ Kümeleme kalitesi ORTA - Bazı clusterlar örtüşüyor olabilir")
                         else:
                             st.error(f"❌ Kümeleme kalitesi DÜŞÜK - Clusterlar yeterince ayrışmamış")
+
+                        # Min-10 Durumu
+                        if enable_min10:
+                            min_count = stats_df['Count'].min() if 'Count' in stats_df.columns else 0
+                            if isinstance(min_count, str):
+                                min_count = int(min_count.replace(".", ""))
+
+                            total_filtered = len(filtered)
+                            expected_min = min(10, max(1, total_filtered // 9))
+
+                            st.markdown("<hr>", unsafe_allow_html=True)
+                            st.markdown("**📏 Min-10 Balancing Durumu**")
+
+                            if total_filtered < 90:
+                                st.info(f"ℹ️ Filtrelenmiş veri ({total_filtered} satır) 90'dan az olduğu için dinamik minimum uygulandı: **{expected_min}** mağaza/cluster")
+
+                            # En küçük cluster kontrolü
+                            small_clusters = [row['Cluster'] for _, row in stats_df.iterrows()
+                                            if (int(str(row['Count']).replace(".", "")) if isinstance(row['Count'], str) else row['Count']) < expected_min]
+
+                            if small_clusters:
+                                st.warning(f"⚠️ Bazı clusterlar minimum ({expected_min}) altında: {', '.join(small_clusters[:3])}")
 
                 # İndir
                 st.markdown("<hr>", unsafe_allow_html=True)
